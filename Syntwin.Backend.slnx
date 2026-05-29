@@ -1,0 +1,8 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Syntwin.Api/Syntwin.Api.csproj" />
+    <Project Path="src/Syntwin.Application/Syntwin.Application.csproj" />
+    <Project Path="src/Syntwin.Domain/Syntwin.Domain.csproj" />
+    <Project Path="src/Syntwin.Infrastructure/Syntwin.Infrastructure.csproj" />
+  </Folder>
+</Solution>

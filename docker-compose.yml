@@ -1,0 +1,23 @@
+name: syntwin
+
+services:
+  syntwin-sqlserver:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    container_name: syntwin-sqlserver
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_SA_PASSWORD: ${SQLSERVER_SA_PASSWORD}
+      MSSQL_PID: "Developer"
+    ports:
+      - "${SQLSERVER_PORT}:1433"
+    volumes:
+      - syntwin_sql_data:/var/opt/mssql
+    networks:
+      - syntwin_network
+
+volumes:
+  syntwin_sql_data:
+
+networks:
+  syntwin_network:
+    driver: bridge
