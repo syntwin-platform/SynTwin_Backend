@@ -14,7 +14,14 @@ services:
       - syntwin_sql_data:/var/opt/mssql
     networks:
       - syntwin_network
-
+      
+  syntwin-redis:
+    image: redis:7-alpine
+    container_name: syntwin-redis
+    ports:
+      - "16379:6379"
+    networks:
+      - syntwin_network
 volumes:
   syntwin_sql_data:
 
