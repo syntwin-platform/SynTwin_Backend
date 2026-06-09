@@ -25,6 +25,8 @@ public sealed class RobotCommand
 
     public DateTimeOffset? CompletedAt { get; set; }
 
+    public DateTimeOffset? TimeoutAt { get; set; }
+
     public string? FailureReason { get; set; }
 
     public Robot? Robot { get; set; }

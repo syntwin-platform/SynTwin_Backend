@@ -36,6 +36,7 @@ public sealed class DeviceController : ControllerBase
         var result = await _deviceGatewayService.HeartbeatAsync(
             robotId,
             deviceSecret,
+            GetClientIpAddress(),
             cancellationToken);
 
         return result switch
@@ -68,6 +69,7 @@ public sealed class DeviceController : ControllerBase
                 robotId,
                 deviceSecret,
                 request,
+                GetClientIpAddress(),
                 cancellationToken);
 
             return result switch
@@ -102,6 +104,7 @@ public sealed class DeviceController : ControllerBase
         var command = await _deviceGatewayService.TakePendingCommandAsync(
             robotId,
             deviceSecret,
+            GetClientIpAddress(),
             cancellationToken);
 
         if (!command.IsAuthenticated)
@@ -118,7 +121,7 @@ public sealed class DeviceController : ControllerBase
     }
 
     [HttpPost("commands/result")]
-    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(DeviceCommandResultResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
@@ -135,22 +138,33 @@ public sealed class DeviceController : ControllerBase
 
         try
         {
-            var result = await _deviceGatewayService.SubmitCommandResultAsync(
+            var commandResult = await _deviceGatewayService.SubmitCommandResultAsync(
                 robotId,
                 deviceSecret,
                 request,
+                GetClientIpAddress(),
                 cancellationToken);
 
-            return result switch
+            if (!commandResult.IsAuthenticated)
             {
-                true => Ok(new { message = "Command result accepted." }),
-                false => StatusCode(StatusCodes.Status403Forbidden, new { message = "Robot is disabled." }),
-                _ => Unauthorized(new { message = "Invalid device credentials." })
-            };
+                return Unauthorized(new { message = "Invalid device credentials." });
+            }
+
+            if (commandResult.IsDisabled)
+            {
+                return StatusCode(StatusCodes.Status403Forbidden, new { message = "Robot is disabled." });
+            }
+
+            return Ok(commandResult.Result);
         }
         catch (InvalidOperationException exception)
         {
             return BadRequest(new { message = exception.Message });
         }
+    }
+
+    private string? GetClientIpAddress()
+    {
+        return HttpContext.Connection.RemoteIpAddress?.ToString();
     }
 }

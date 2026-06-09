@@ -477,6 +477,8 @@ public sealed class SyntwinDbContext : DbContext
             entity.Property(command => command.CreatedAt)
                 .IsRequired();
 
+            entity.Property(command => command.TimeoutAt);
+
             entity.Property(command => command.FailureReason)
                 .HasMaxLength(500);
 
@@ -488,6 +490,9 @@ public sealed class SyntwinDbContext : DbContext
 
             entity.HasIndex(command => new { command.RobotId, command.Status, command.CreatedAt })
                 .HasDatabaseName("IX_robot_commands_robot_status_created_at");
+
+            entity.HasIndex(command => new { command.Status, command.TimeoutAt })
+                .HasDatabaseName("IX_robot_commands_status_timeout_at");
 
             entity.HasOne(command => command.Robot)
                 .WithMany(robot => robot.Commands)

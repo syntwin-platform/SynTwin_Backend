@@ -1,4 +1,5 @@
 ﻿using Syntwin.Domain.Entities;
+using Syntwin.Domain.Enums;
 
 namespace Syntwin.Application.Commands.Interfaces;
 
@@ -28,4 +29,8 @@ public interface IRobotCommandRepository
     Task AddCommandResultAsync(
         CommandResult result,
         CancellationToken cancellationToken = default);
+
+    Task<IReadOnlyList<RobotCommand>> ListExpiredActiveCommandsAsync(
+    DateTimeOffset now,
+    CancellationToken cancellationToken = default);
 }

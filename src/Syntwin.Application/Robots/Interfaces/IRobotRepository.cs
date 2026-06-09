@@ -1,5 +1,5 @@
 ﻿using Syntwin.Domain.Entities;
-
+using Syntwin.Domain.Enums;
 namespace Syntwin.Application.Robots.Interfaces;
 
 public interface IRobotRepository
@@ -13,6 +13,10 @@ public interface IRobotRepository
     Task AddAsync(Robot robot, CancellationToken cancellationToken = default);
 
     Task SaveChangesAsync(CancellationToken cancellationToken = default);
+
+    Task<IReadOnlyList<Robot>> ListByStatusAsync(
+    RobotStatus status,
+    CancellationToken cancellationToken = default);
 
 
 }

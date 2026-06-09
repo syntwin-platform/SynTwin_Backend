@@ -91,4 +91,20 @@ public sealed class RobotCommandRepository : IRobotCommandRepository
     {
         return _dbContext.SaveChangesAsync(cancellationToken);
     }
+
+    public async Task<IReadOnlyList<RobotCommand>> ListExpiredActiveCommandsAsync(
+    DateTimeOffset now,
+    CancellationToken cancellationToken = default)
+    {
+        return await _dbContext.RobotCommands
+            .Where(command =>
+                command.TimeoutAt != null &&
+                command.TimeoutAt <= now &&
+                (command.Status == CommandStatus.Pending ||
+                 command.Status == CommandStatus.Sent) &&
+                command.Result == null)
+            .OrderBy(command => command.TimeoutAt)
+            .ToListAsync(cancellationToken);
+    }
+
 }

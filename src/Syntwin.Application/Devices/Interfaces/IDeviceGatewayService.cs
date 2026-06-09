@@ -7,22 +7,26 @@ public interface IDeviceGatewayService
     Task<bool?> HeartbeatAsync(
         Guid robotId,
         string deviceSecret,
+        string? ipAddress = null,
         CancellationToken cancellationToken = default);
 
     Task<DevicePendingCommandResult> TakePendingCommandAsync(
         Guid robotId,
         string deviceSecret,
+        string? ipAddress = null,
         CancellationToken cancellationToken = default);
 
-    Task<bool?> SubmitCommandResultAsync(
+    Task<DeviceCommandResultSubmitResult> SubmitCommandResultAsync(
         Guid robotId,
         string deviceSecret,
         DeviceCommandResultRequest request,
+        string? ipAddress = null,
         CancellationToken cancellationToken = default);
 
     Task<bool?> SubmitTelemetryAsync(
     Guid robotId,
     string deviceSecret,
     DeviceTelemetryRequest request,
+    string? ipAddress = null,
     CancellationToken cancellationToken = default);
 }

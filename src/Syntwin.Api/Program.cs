@@ -6,6 +6,10 @@ using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
 using Microsoft.AspNetCore.RateLimiting;
 using System.Threading.RateLimiting;
+using Syntwin.Api.Hubs;
+using Syntwin.Api.Realtime;
+using Syntwin.Application.Realtime.Interfaces;
+using Syntwin.Api.BackgroundServices;
 
 const string CorsPolicyName = "SyntwinCors";
 var builder = WebApplication.CreateBuilder(args);
@@ -13,6 +17,11 @@ var builder = WebApplication.CreateBuilder(args);
 // Add services to the container.
 
 builder.Services.AddControllers();
+builder.Services.AddSignalR();
+
+builder.Services.AddScoped<IRobotRealtimeNotifier, SignalRRobotRealtimeNotifier>();
+builder.Services.AddHostedService<RobotOfflineMonitorService>();
+builder.Services.AddHostedService<RobotCommandTimeoutMonitorService>();
 
 var allowedOrigins = builder.Configuration
     .GetSection("Cors:AllowedOrigins")
@@ -25,9 +34,10 @@ builder.Services.AddCors(options =>
         if (allowedOrigins.Length > 0)
         {
             policy
-                .WithOrigins(allowedOrigins)
-                .AllowAnyHeader()
-                .AllowAnyMethod();
+    .WithOrigins(allowedOrigins)
+    .AllowAnyHeader()
+    .AllowAnyMethod()
+    .AllowCredentials();
         }
     });
 });
@@ -109,6 +119,23 @@ builder.Services
             ValidateLifetime = true,
             ClockSkew = TimeSpan.FromMinutes(1)
         };
+
+        options.Events = new JwtBearerEvents
+        {
+            OnMessageReceived = context =>
+            {
+                var accessToken = context.Request.Query["access_token"];
+                var path = context.HttpContext.Request.Path;
+
+                if (!string.IsNullOrWhiteSpace(accessToken) &&
+                    path.StartsWithSegments("/hubs/telemetry"))
+                {
+                    context.Token = accessToken;
+                }
+
+                return Task.CompletedTask;
+            }
+        };
     });
 
 builder.Services.AddAuthorization();
@@ -142,4 +169,5 @@ app.UseAuthentication();
 app.UseAuthorization();
 app.UseRateLimiter();
 app.MapControllers();
+app.MapHub<TelemetryHub>("/hubs/telemetry");
 app.Run();

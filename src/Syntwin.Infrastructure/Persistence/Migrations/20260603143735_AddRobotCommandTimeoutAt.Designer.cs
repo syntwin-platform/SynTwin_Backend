@@ -3,6 +3,7 @@ using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Syntwin.Infrastructure.Persistence;
 
@@ -11,9 +12,11 @@ using Syntwin.Infrastructure.Persistence;
 namespace Syntwin.Infrastructure.Persistence.Migrations
 {
     [DbContext(typeof(SyntwinDbContext))]
-    partial class SyntwinDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260603143735_AddRobotCommandTimeoutAt")]
+    partial class AddRobotCommandTimeoutAt
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder

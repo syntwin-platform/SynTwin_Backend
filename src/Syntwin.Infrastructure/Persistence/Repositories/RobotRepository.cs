@@ -47,6 +47,16 @@ public sealed class RobotRepository : IRobotRepository
         await _dbContext.Robots.AddAsync(robot, cancellationToken);
     }
 
+    public async Task<IReadOnlyList<Robot>> ListByStatusAsync(
+    RobotStatus status,
+    CancellationToken cancellationToken = default)
+    {
+        return await _dbContext.Robots
+            .Where(robot => robot.Status == status)
+            .OrderBy(robot => robot.LastSeenAt)
+            .ToListAsync(cancellationToken);
+    }
+
     public Task SaveChangesAsync(CancellationToken cancellationToken = default)
     {
         return _dbContext.SaveChangesAsync(cancellationToken);
