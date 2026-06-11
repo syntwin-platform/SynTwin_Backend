@@ -94,6 +94,7 @@ public sealed class DeviceController : ControllerBase
     public async Task<IActionResult> GetPendingCommand(
         [FromHeader(Name = "X-Robot-Id")][Required] string robotIdHeader,
         [FromHeader(Name = "X-Device-Secret")][Required] string deviceSecret,
+        [FromQuery] bool isBusy,
         CancellationToken cancellationToken)
     {
         if (!Guid.TryParse(robotIdHeader, out var robotId))
@@ -104,6 +105,7 @@ public sealed class DeviceController : ControllerBase
         var command = await _deviceGatewayService.TakePendingCommandAsync(
             robotId,
             deviceSecret,
+            isBusy,
             GetClientIpAddress(),
             cancellationToken);
 
@@ -114,7 +116,9 @@ public sealed class DeviceController : ControllerBase
 
         if (command.IsDisabled)
         {
-            return StatusCode(StatusCodes.Status403Forbidden, new { message = "Robot is disabled." });
+            return StatusCode(
+                StatusCodes.Status403Forbidden,
+                new { message = "Robot is disabled." });
         }
 
         return command.Command is null ? NoContent() : Ok(command.Command);

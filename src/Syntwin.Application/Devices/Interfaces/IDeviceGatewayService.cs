@@ -11,10 +11,11 @@ public interface IDeviceGatewayService
         CancellationToken cancellationToken = default);
 
     Task<DevicePendingCommandResult> TakePendingCommandAsync(
-        Guid robotId,
-        string deviceSecret,
-        string? ipAddress = null,
-        CancellationToken cancellationToken = default);
+     Guid robotId,
+     string deviceSecret,
+     bool isBusy = false,
+     string? ipAddress = null,
+     CancellationToken cancellationToken = default);
 
     Task<DeviceCommandResultSubmitResult> SubmitCommandResultAsync(
         Guid robotId,

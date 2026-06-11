@@ -23,6 +23,8 @@ public sealed class SyntwinDbContext : DbContext
     public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
     public DbSet<RobotProgram> RobotPrograms => Set<RobotProgram>();
     public DbSet<RobotProgramStep> RobotProgramSteps => Set<RobotProgramStep>();
+    public DbSet<Company> Companies => Set<Company>();
+    public DbSet<CompanyMember> CompanyMembers => Set<CompanyMember>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -40,6 +42,98 @@ public sealed class SyntwinDbContext : DbContext
         ConfigureRobotPrograms(modelBuilder);
         ConfigureRobotProgramSteps(modelBuilder);
         ConfigureAuditLogs(modelBuilder);
+        ConfigureCompanies(modelBuilder);
+        ConfigureCompanyMembers(modelBuilder);
+    }
+
+    private static void ConfigureCompanies(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<Company>(entity =>
+        {
+            entity.ToTable("companies");
+
+            entity.HasKey(company => company.Id);
+
+            entity.Property(company => company.Name)
+                .IsRequired()
+                .HasMaxLength(150);
+
+            entity.Property(company => company.Slug)
+                .IsRequired()
+                .HasMaxLength(180);
+
+            entity.HasIndex(company => company.Slug)
+                .IsUnique()
+                .HasDatabaseName("UX_companies_slug");
+
+            entity.Property(company => company.Industry)
+                .HasMaxLength(100);
+
+            entity.Property(company => company.Address)
+                .HasMaxLength(300);
+
+            entity.Property(company => company.Timezone)
+                .IsRequired()
+                .HasMaxLength(50)
+                .HasDefaultValue("Asia/Ho_Chi_Minh");
+
+            entity.Property(company => company.LogoUrl)
+                .HasMaxLength(500);
+
+            entity.Property(company => company.Status)
+                .HasConversion<string>()
+                .IsRequired()
+                .HasMaxLength(30);
+
+            entity.Property(company => company.CreatedAt)
+                .IsRequired();
+
+            entity.HasIndex(company => company.CreatedByUserId)
+                .HasDatabaseName("IX_companies_created_by_user_id");
+
+            entity.HasOne(company => company.CreatedByUser)
+                .WithMany(user => user.CreatedCompanies)
+                .HasForeignKey(company => company.CreatedByUserId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+    }
+
+    private static void ConfigureCompanyMembers(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<CompanyMember>(entity =>
+        {
+            entity.ToTable("company_members");
+
+            entity.HasKey(member => new { member.CompanyId, member.UserId });
+
+            entity.Property(member => member.Role)
+                .HasConversion<string>()
+                .IsRequired()
+                .HasMaxLength(30);
+
+            entity.Property(member => member.IsActive)
+                .IsRequired()
+                .HasDefaultValue(true);
+
+            entity.Property(member => member.JoinedAt)
+                .IsRequired();
+
+            entity.HasIndex(member => member.UserId)
+                .HasDatabaseName("IX_company_members_user_id");
+
+            entity.HasIndex(member => new { member.CompanyId, member.IsActive })
+                .HasDatabaseName("IX_company_members_company_active");
+
+            entity.HasOne(member => member.Company)
+                .WithMany(company => company.Members)
+                .HasForeignKey(member => member.CompanyId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(member => member.User)
+                .WithMany(user => user.CompanyMemberships)
+                .HasForeignKey(member => member.UserId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
     }
 
     private static void ConfigureUsers(ModelBuilder modelBuilder)
@@ -443,6 +537,9 @@ public sealed class SyntwinDbContext : DbContext
             entity.HasIndex(robot => robot.UserId)
                 .HasDatabaseName("IX_robots_user_id");
 
+            entity.HasIndex(robot => robot.CompanyId)
+                .HasDatabaseName("IX_robots_company_id");
+
             entity.HasIndex(robot => robot.Status)
                 .HasDatabaseName("IX_robots_status");
 
@@ -450,6 +547,12 @@ public sealed class SyntwinDbContext : DbContext
                 .WithMany()
                 .HasForeignKey(robot => robot.UserId)
                 .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(robot => robot.Company)
+                .WithMany(company => company.Robots)
+                .HasForeignKey(robot => robot.CompanyId)
+                .OnDelete(DeleteBehavior.Restrict);
+
         });
     }
 

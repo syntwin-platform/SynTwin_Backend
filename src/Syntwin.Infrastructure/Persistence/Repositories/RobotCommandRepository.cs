@@ -28,19 +28,31 @@ public sealed class RobotCommandRepository : IRobotCommandRepository
             .OrderByDescending(command => command.CreatedAt)
             .ToListAsync(cancellationToken);
     }
-    public async Task<RobotCommand?> TakeOldestPendingAsync(
-    Guid robotId,
-    CancellationToken cancellationToken = default)
+    public async Task<RobotCommand?> TakeNextPendingAsync(
+     Guid robotId,
+     bool safetyOnly = false,
+     CancellationToken cancellationToken = default)
     {
         await using var transaction = await _dbContext.Database.BeginTransactionAsync(
             IsolationLevel.Serializable,
             cancellationToken);
 
-        var command = await _dbContext.RobotCommands
+        var pendingCommands = _dbContext.RobotCommands
             .Where(command =>
                 command.RobotId == robotId &&
-                command.Status == CommandStatus.Pending)
-            .OrderBy(command => command.CreatedAt)
+                command.Status == CommandStatus.Pending);
+
+        if (safetyOnly)
+        {
+            pendingCommands = pendingCommands.Where(
+                command => command.CommandType == RobotCommandType.EStop);
+        }
+
+        var command = await pendingCommands
+            .OrderBy(command =>
+                command.CommandType == RobotCommandType.EStop ? 0 : 1)
+            .ThenBy(command => command.CreatedAt)
+            .ThenBy(command => command.Id)
             .FirstOrDefaultAsync(cancellationToken);
 
         if (command is null)
@@ -61,7 +73,6 @@ public sealed class RobotCommandRepository : IRobotCommandRepository
 
         return command;
     }
-
     public Task<RobotCommand?> GetByIdForRobotAsync(
         Guid commandId,
         Guid robotId,

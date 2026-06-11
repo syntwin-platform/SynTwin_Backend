@@ -6,7 +6,7 @@ using Syntwin.Domain.Entities;
 using Syntwin.Domain.Enums;
 using Syntwin.Application.Realtime.Dtos;
 using Syntwin.Application.Realtime.Interfaces;
-
+using Syntwin.Application.AuditLogs.Interfaces;
 
 namespace Syntwin.Application.RobotPrograms.Services;
 
@@ -15,15 +15,21 @@ public sealed class RobotProgramService : IRobotProgramService
     private readonly IRobotRepository _robotRepository;
     private readonly IRobotProgramRepository _programRepository;
     private readonly IRobotRealtimeNotifier _realtimeNotifier;
+    private readonly IRobotAccessService _robotAccessService;
+    private readonly IAuditLogRepository _auditLogRepository;
 
     public RobotProgramService(
-      IRobotRepository robotRepository,
-      IRobotProgramRepository programRepository,
-      IRobotRealtimeNotifier realtimeNotifier)
+    IRobotRepository robotRepository,
+    IRobotProgramRepository programRepository,
+    IRobotRealtimeNotifier realtimeNotifier,
+    IRobotAccessService robotAccessService,
+    IAuditLogRepository auditLogRepository)
     {
         _robotRepository = robotRepository;
         _programRepository = programRepository;
         _realtimeNotifier = realtimeNotifier;
+        _robotAccessService = robotAccessService;
+        _auditLogRepository = auditLogRepository;
     }
 
     public async Task<IReadOnlyList<RobotProgramResponse>?> ListAsync(
@@ -33,7 +39,8 @@ public sealed class RobotProgramService : IRobotProgramService
     {
         var robot = await _robotRepository.GetByIdAsync(robotId, cancellationToken);
 
-        if (robot is null || robot.UserId != userId)
+        if (robot is null ||
+            !await HasAccessAsync(userId, robot.CompanyId, cancellationToken))
         {
             return null;
         }
@@ -51,7 +58,8 @@ public sealed class RobotProgramService : IRobotProgramService
     {
         var robot = await _robotRepository.GetByIdAsync(robotId, cancellationToken);
 
-        if (robot is null || robot.UserId != userId)
+        if (robot is null ||
+            !await HasAccessAsync(userId, robot.CompanyId, cancellationToken))
         {
             return null;
         }
@@ -65,14 +73,21 @@ public sealed class RobotProgramService : IRobotProgramService
     }
 
     public async Task<RobotProgramResponse?> CreateAsync(
-        Guid userId,
-        Guid robotId,
-        CreateRobotProgramRequest request,
-        CancellationToken cancellationToken = default)
+    Guid userId,
+    Guid robotId,
+    CreateRobotProgramRequest request,
+    string? ipAddress,
+    CancellationToken cancellationToken = default)
     {
         var robot = await _robotRepository.GetByIdAsync(robotId, cancellationToken);
 
-        if (robot is null || robot.UserId != userId)
+        if (robot is null)
+        {
+            return null;
+        }
+
+        var role = await GetRoleAsync(userId, robot.CompanyId, cancellationToken);
+        if (!role.HasValue)
         {
             return null;
         }
@@ -107,21 +122,37 @@ public sealed class RobotProgramService : IRobotProgramService
         };
 
         await _programRepository.AddAsync(program, cancellationToken);
+        await AddProgramAuditAsync(
+userId,
+robot.CompanyId,
+role.Value,
+program,
+"PROGRAM_CREATED",
+"Created",
+ipAddress,
+cancellationToken);
         await _programRepository.SaveChangesAsync(cancellationToken);
         await _realtimeNotifier.NotifyProgramUpdatedAsync(ToProgramUpdatedEvent(program, "Created"), cancellationToken);
         return ToResponse(program);
     }
 
     public async Task<RobotProgramResponse?> UpdateAsync(
-        Guid userId,
-        Guid robotId,
-        Guid programId,
-        UpdateRobotProgramRequest request,
-        CancellationToken cancellationToken = default)
+      Guid userId,
+      Guid robotId,
+      Guid programId,
+      UpdateRobotProgramRequest request,
+      string? ipAddress,
+      CancellationToken cancellationToken = default)
     {
         var robot = await _robotRepository.GetByIdAsync(robotId, cancellationToken);
 
-        if (robot is null || robot.UserId != userId)
+        if (robot is null)
+        {
+            return null;
+        }
+
+        var role = await GetRoleAsync(userId, robot.CompanyId, cancellationToken);
+        if (!role.HasValue)
         {
             return null;
         }
@@ -157,6 +188,15 @@ public sealed class RobotProgramService : IRobotProgramService
         program.UpdatedAt = now;
 
         ApplyStepUpdates(program, request.Steps, now);
+        await AddProgramAuditAsync(
+    userId,
+    robot.CompanyId,
+    role.Value,
+    program,
+    "PROGRAM_UPDATED",
+    "Updated",
+    ipAddress,
+    cancellationToken);
 
         await _programRepository.SaveChangesAsync(cancellationToken);
         await _realtimeNotifier.NotifyProgramUpdatedAsync(
@@ -170,11 +210,18 @@ public sealed class RobotProgramService : IRobotProgramService
         Guid userId,
         Guid robotId,
         Guid programId,
+        string? ipAddress,
         CancellationToken cancellationToken = default)
     {
         var robot = await _robotRepository.GetByIdAsync(robotId, cancellationToken);
 
-        if (robot is null || robot.UserId != userId)
+        if (robot is null)
+        {
+            return null;
+        }
+
+        var role = await GetRoleAsync(userId, robot.CompanyId, cancellationToken);
+        if (!role.HasValue)
         {
             return null;
         }
@@ -206,7 +253,15 @@ public sealed class RobotProgramService : IRobotProgramService
 
         program.Status = RobotProgramStatus.Published;
         program.UpdatedAt = DateTimeOffset.UtcNow;
-
+        await AddProgramAuditAsync(
+    userId,
+    robot.CompanyId,
+    role.Value,
+    program,
+    "PROGRAM_PUBLISHED",
+    "Published",
+    ipAddress,
+    cancellationToken);
         await _programRepository.SaveChangesAsync(cancellationToken);
         await _realtimeNotifier.NotifyProgramUpdatedAsync(
     ToProgramUpdatedEvent(program, "Published"),
@@ -215,17 +270,25 @@ public sealed class RobotProgramService : IRobotProgramService
     }
 
     public async Task<bool> ArchiveAsync(
-        Guid userId,
-        Guid robotId,
-        Guid programId,
-        CancellationToken cancellationToken = default)
+     Guid userId,
+     Guid robotId,
+     Guid programId,
+     string? ipAddress,
+     CancellationToken cancellationToken = default)
     {
         var robot = await _robotRepository.GetByIdAsync(robotId, cancellationToken);
 
-        if (robot is null || robot.UserId != userId)
+        if (robot is null)
         {
             return false;
         }
+
+        var role = await GetRoleAsync(userId, robot.CompanyId, cancellationToken);
+        if (!role.HasValue)
+        {
+            return false;
+        }
+
 
         var program = await _programRepository.GetByIdForRobotAsync(
             robotId,
@@ -244,7 +307,15 @@ public sealed class RobotProgramService : IRobotProgramService
 
         program.Status = RobotProgramStatus.Archived;
         program.UpdatedAt = DateTimeOffset.UtcNow;
-
+        await AddProgramAuditAsync(
+    userId,
+    robot.CompanyId,
+    role.Value,
+    program,
+    "PROGRAM_ARCHIVED",
+    "Archived",
+    ipAddress,
+    cancellationToken);
         await _programRepository.SaveChangesAsync(cancellationToken);
         await _realtimeNotifier.NotifyProgramUpdatedAsync(
     ToProgramUpdatedEvent(program, "Archived"),
@@ -692,4 +763,74 @@ public sealed class RobotProgramService : IRobotProgramService
 
         return source;
     }
+
+    private async Task AddProgramAuditAsync(
+    Guid userId,
+    Guid companyId,
+    CompanyMemberRole actorCompanyRole,
+    RobotProgram program,
+    string action,
+    string changeType,
+    string? ipAddress,
+    CancellationToken cancellationToken)
+    {
+        var payload = JsonSerializer.Serialize(new
+        {
+            companyId,
+            actorCompanyRole = actorCompanyRole.ToString(),
+            programId = program.Id,
+            programName = program.Name,
+            programStatus = program.Status.ToString(),
+            changeType,
+            steps = program.Steps
+                .OrderBy(step => step.OrderIndex)
+                .Select(step => new
+                {
+                    step.Id,
+                    step.OrderIndex,
+                    stepType = step.StepType.ToString(),
+                    step.Label,
+                    payload = JsonSerializer.Deserialize<JsonElement>(
+                        step.PayloadJson)
+                })
+                .ToList()
+        });
+
+        await _auditLogRepository.AddAsync(new AuditLog
+        {
+            UserId = userId,
+            RobotId = program.RobotId,
+            Action = action,
+            IpAddress = NormalizeNullable(ipAddress),
+            Message = $"Program '{program.Name}' was {changeType.ToLowerInvariant()}.",
+            RawPayloadJson = payload,
+            CreatedAt = DateTimeOffset.UtcNow
+        }, cancellationToken);
+    }
+
+    private static string? NormalizeNullable(string? value)
+    {
+        return string.IsNullOrWhiteSpace(value)
+            ? null
+            : value.Trim();
+    }
+    private async Task<bool> HasAccessAsync(
+        Guid userId,
+        Guid companyId,
+        CancellationToken cancellationToken)
+    {
+        return (await GetRoleAsync(userId, companyId, cancellationToken)).HasValue;
+    }
+
+    private Task<CompanyMemberRole?> GetRoleAsync(
+        Guid userId,
+        Guid companyId,
+        CancellationToken cancellationToken)
+    {
+        return _robotAccessService.GetCompanyRoleAsync(
+            userId,
+            companyId,
+            cancellationToken);
+    }
+
 }

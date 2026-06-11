@@ -7,7 +7,7 @@ using Syntwin.Application.Users.Interfaces;
 using Syntwin.Domain.Entities;
 using Syntwin.Domain.Enums;
 using Syntwin.Application.RobotPrograms.Interfaces;
-
+using Syntwin.Application.Companies.Interfaces;
 
 namespace Syntwin.Application.Commands.Services;
 
@@ -20,19 +20,25 @@ public sealed class RobotCommandService : IRobotCommandService
     private readonly IRobotCommandRepository _commandRepository;
     private readonly IAuditLogRepository _auditLogRepository;
     private readonly IRobotProgramRepository _programRepository;
+    private readonly IRobotAccessService _robotAccessService;
+    private readonly ICompanyRepository _companyRepository;
 
     public RobotCommandService(
-     IRobotRepository robotRepository,
-     IUserRepository userRepository,
-     IRobotCommandRepository commandRepository,
-     IAuditLogRepository auditLogRepository,
-     IRobotProgramRepository programRepository)
+    IRobotRepository robotRepository,
+    IUserRepository userRepository,
+    IRobotCommandRepository commandRepository,
+    IAuditLogRepository auditLogRepository,
+    IRobotProgramRepository programRepository,
+    IRobotAccessService robotAccessService,
+    ICompanyRepository companyRepository)
     {
         _robotRepository = robotRepository;
         _userRepository = userRepository;
         _commandRepository = commandRepository;
         _auditLogRepository = auditLogRepository;
         _programRepository = programRepository;
+        _robotAccessService = robotAccessService;
+        _companyRepository = companyRepository;
     }
 
     public async Task<RobotCommandResponse?> CreateAsync(
@@ -45,7 +51,17 @@ public sealed class RobotCommandService : IRobotCommandService
         var user = await _userRepository.GetByIdAsync(userId, cancellationToken);
         var robot = await _robotRepository.GetByIdAsync(robotId, cancellationToken);
 
-        if (user is null || robot is null || robot.UserId != userId)
+        if (user is null || robot is null)
+        {
+            return null;
+        }
+
+        var role = await _robotAccessService.GetCompanyRoleAsync(
+            userId,
+            robot.CompanyId,
+            cancellationToken);
+
+        if (!role.HasValue)
         {
             return null;
         }
@@ -55,7 +71,25 @@ public sealed class RobotCommandService : IRobotCommandService
             throw new UnauthorizedAccessException("Super Admin cannot control customer robots.");
         }
 
-        var plan = user.Subscriptions
+        var company = await _companyRepository.GetByIdAsync(
+     robot.CompanyId,
+     cancellationToken);
+
+        if (company is null || company.Status != CompanyStatus.Active)
+        {
+            return null;
+        }
+
+        var companyOwner = await _userRepository.GetByIdAsync(
+            company.CreatedByUserId,
+            cancellationToken);
+
+        if (companyOwner is null)
+        {
+            throw new InvalidOperationException("Company owner not found.");
+        }
+
+        var plan = companyOwner.Subscriptions
             .Where(subscription => subscription.Status == SubscriptionStatus.Active)
             .OrderByDescending(subscription => subscription.StartsAt)
             .Select(subscription => subscription.Plan)
@@ -69,12 +103,18 @@ public sealed class RobotCommandService : IRobotCommandService
                 RobotId = robotId,
                 Action = "COMMAND_BLOCKED_REQUIRE_PREMIUM",
                 IpAddress = ipAddress,
-                Message = "Command was blocked because current plan cannot send commands.",
+                Message = "Command was blocked because company owner's plan cannot send commands.",
+                RawPayloadJson = CreateAuditContext(
+        robot.CompanyId,
+        role.Value,
+        request.CommandType,
+        request.Payload?.GetRawText()),
                 CreatedAt = DateTimeOffset.UtcNow
             }, cancellationToken);
 
             await _commandRepository.SaveChangesAsync(cancellationToken);
-            throw new InvalidOperationException("Premium plan is required to send robot commands.");
+            throw new UnauthorizedAccessException(
+                "Current subscription plan cannot send robot commands.");
         }
 
         if (!Enum.TryParse<RobotCommandType>(request.CommandType, true, out var commandType))
@@ -112,7 +152,11 @@ public sealed class RobotCommandService : IRobotCommandService
             RobotId = robotId,
             Action = "COMMAND_REQUESTED",
             IpAddress = ipAddress,
-            RawPayloadJson = command.PayloadJson,
+            RawPayloadJson = CreateAuditContext(
+    robot.CompanyId,
+    role.Value,
+    command.CommandType.ToString(),
+    command.PayloadJson),
             Message = $"Command {command.CommandType} was requested.",
             CreatedAt = DateTimeOffset.UtcNow
         }, cancellationToken);
@@ -129,7 +173,17 @@ public sealed class RobotCommandService : IRobotCommandService
     {
         var robot = await _robotRepository.GetByIdAsync(robotId, cancellationToken);
 
-        if (robot is null || robot.UserId != userId)
+        if (robot is null)
+        {
+            return null;
+        }
+
+        var role = await _robotAccessService.GetCompanyRoleAsync(
+            userId,
+            robot.CompanyId,
+            cancellationToken);
+
+        if (!role.HasValue)
         {
             return null;
         }
@@ -138,6 +192,27 @@ public sealed class RobotCommandService : IRobotCommandService
         return commands.Select(ToResponse).ToList();
     }
 
+    private static string CreateAuditContext(
+    Guid companyId,
+    CompanyMemberRole actorCompanyRole,
+    string commandType,
+    string? payloadJson)
+    {
+        JsonElement? payload = null;
+
+        if (!string.IsNullOrWhiteSpace(payloadJson))
+        {
+            payload = JsonSerializer.Deserialize<JsonElement>(payloadJson);
+        }
+
+        return JsonSerializer.Serialize(new
+        {
+            companyId,
+            actorCompanyRole = actorCompanyRole.ToString(),
+            commandType,
+            payload
+        });
+    }
     private static void ValidateCommandPayload(
     RobotCommandType commandType,
     JsonElement? payload)
@@ -374,18 +449,18 @@ public sealed class RobotCommandService : IRobotCommandService
             programStatus = program.Status.ToString(),
             snapshottedAt = DateTimeOffset.UtcNow,
             steps = program.Steps
-                .OrderBy(step => step.OrderIndex)
-                .Select(step => new
-                {
-                    step.Id,
-                    step.OrderIndex,
-                    stepType = step.StepType.ToString(),
-                    step.Label,
-                    payload = string.IsNullOrWhiteSpace(step.PayloadJson)
-                        ? JsonSerializer.Deserialize<JsonElement>("{}")
-                        : JsonSerializer.Deserialize<JsonElement>(step.PayloadJson)
-                })
-                .ToList()
+    .OrderBy(step => step.OrderIndex)
+    .Select(step => new
+    {
+        id = step.Id,
+        orderIndex = step.OrderIndex,
+        stepType = step.StepType.ToString(),
+        label = step.Label,
+        payload = string.IsNullOrWhiteSpace(step.PayloadJson)
+            ? JsonSerializer.Deserialize<JsonElement>("{}")
+            : JsonSerializer.Deserialize<JsonElement>(step.PayloadJson)
+    })
+    .ToList()
         };
 
         return JsonSerializer.Serialize(snapshot);
@@ -429,4 +504,5 @@ public sealed class RobotCommandService : IRobotCommandService
             CreatedAt = command.CreatedAt
         };
     }
+
 }

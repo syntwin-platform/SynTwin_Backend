@@ -29,7 +29,7 @@ syntwin-mosquitto
 Dùng `.env` cho local dev:
 
 ```env
-SQLSERVER_SA_PASSWORD=Syntwin@123456
+SQLSERVER_SA_PASSWORD=<strong-local-password>
 SQLSERVER_PORT=11433
 ASPNETCORE_ENVIRONMENT=Development
 ```
@@ -55,7 +55,7 @@ Server=syntwin-sqlserver,1433;Database=SyntwinDb;User Id=sa;Password=${SQLSERVER
 Khi chạy API ngoài Docker, dùng:
 
 ```text
-Server=localhost,11433;Database=SyntwinDb;User Id=sa;Password=Syntwin@123456;TrustServerCertificate=True;
+Server=localhost,11433;Database=SyntwinDb;User Id=sa;Password=<strong-local-password>;TrustServerCertificate=True;
 ```
 
 ## Không làm trong MVP

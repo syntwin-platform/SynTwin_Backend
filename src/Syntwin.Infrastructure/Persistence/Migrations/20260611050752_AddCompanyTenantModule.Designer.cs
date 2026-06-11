@@ -3,6 +3,7 @@ using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Syntwin.Infrastructure.Persistence;
 
@@ -11,9 +12,11 @@ using Syntwin.Infrastructure.Persistence;
 namespace Syntwin.Infrastructure.Persistence.Migrations
 {
     [DbContext(typeof(SyntwinDbContext))]
-    partial class SyntwinDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260611050752_AddCompanyTenantModule")]
+    partial class AddCompanyTenantModule
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -417,9 +420,6 @@ namespace Syntwin.Infrastructure.Persistence.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
 
-                    b.Property<Guid>("CompanyId")
-                        .HasColumnType("uniqueidentifier");
-
                     b.Property<string>("ConnectionType")
                         .IsRequired()
                         .ValueGeneratedOnAdd()
@@ -468,9 +468,6 @@ namespace Syntwin.Infrastructure.Persistence.Migrations
                         .HasColumnType("uniqueidentifier");
 
                     b.HasKey("Id");
-
-                    b.HasIndex("CompanyId")
-                        .HasDatabaseName("IX_robots_company_id");
 
                     b.HasIndex("Status")
                         .HasDatabaseName("IX_robots_status");
@@ -952,19 +949,11 @@ namespace Syntwin.Infrastructure.Persistence.Migrations
 
             modelBuilder.Entity("Syntwin.Domain.Entities.Robot", b =>
                 {
-                    b.HasOne("Syntwin.Domain.Entities.Company", "Company")
-                        .WithMany("Robots")
-                        .HasForeignKey("CompanyId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
                     b.HasOne("Syntwin.Domain.Entities.User", "User")
                         .WithMany()
                         .HasForeignKey("UserId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
-
-                    b.Navigation("Company");
 
                     b.Navigation("User");
                 });
@@ -1040,8 +1029,6 @@ namespace Syntwin.Infrastructure.Persistence.Migrations
             modelBuilder.Entity("Syntwin.Domain.Entities.Company", b =>
                 {
                     b.Navigation("Members");
-
-                    b.Navigation("Robots");
                 });
 
             modelBuilder.Entity("Syntwin.Domain.Entities.Robot", b =>

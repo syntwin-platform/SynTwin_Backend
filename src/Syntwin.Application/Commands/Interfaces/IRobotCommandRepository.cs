@@ -13,9 +13,10 @@ public interface IRobotCommandRepository
 
     Task SaveChangesAsync(CancellationToken cancellationToken = default);
 
-    Task<RobotCommand?> TakeOldestPendingAsync(
-    Guid robotId,
-    CancellationToken cancellationToken = default);
+    Task<RobotCommand?> TakeNextPendingAsync(
+     Guid robotId,
+     bool safetyOnly = false,
+     CancellationToken cancellationToken = default);
 
     Task<RobotCommand?> GetByIdForRobotAsync(
         Guid commandId,

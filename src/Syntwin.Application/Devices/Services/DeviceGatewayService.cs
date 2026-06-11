@@ -176,10 +176,11 @@ public sealed class DeviceGatewayService : IDeviceGatewayService
     }
 
     public async Task<DevicePendingCommandResult> TakePendingCommandAsync(
-        Guid robotId,
-        string deviceSecret,
-        string? ipAddress = null,
-        CancellationToken cancellationToken = default)
+     Guid robotId,
+     string deviceSecret,
+     bool isBusy = false,
+     string? ipAddress = null,
+     CancellationToken cancellationToken = default)
     {
         var auth = await AuthenticateAsync(
             robotId,
@@ -205,7 +206,10 @@ public sealed class DeviceGatewayService : IDeviceGatewayService
             };
         }
 
-        var command = await _commandRepository.TakeOldestPendingAsync(robotId, cancellationToken);
+        var command = await _commandRepository.TakeNextPendingAsync(
+            robotId,
+            safetyOnly: isBusy,
+            cancellationToken: cancellationToken);
 
         return new DevicePendingCommandResult
         {

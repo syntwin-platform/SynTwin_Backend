@@ -78,10 +78,11 @@ public sealed class RobotProgramsController : ControllerBase
         try
         {
             var program = await _programService.CreateAsync(
-                userId.Value,
-                robotId,
-                request,
-                cancellationToken);
+     userId.Value,
+     robotId,
+     request,
+     GetClientIpAddress(),
+     cancellationToken);
 
             return program is null
                 ? NotFound(new { message = "Robot not found." })
@@ -93,6 +94,10 @@ public sealed class RobotProgramsController : ControllerBase
         catch (InvalidOperationException exception)
         {
             return BadRequest(new { message = exception.Message });
+        }
+        catch (UnauthorizedAccessException exception)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new { message = exception.Message });
         }
     }
 
@@ -113,12 +118,12 @@ public sealed class RobotProgramsController : ControllerBase
         try
         {
             var program = await _programService.UpdateAsync(
-                userId.Value,
-                robotId,
-                programId,
-                request,
-                cancellationToken);
-
+        userId.Value,
+        robotId,
+        programId,
+        request,
+        GetClientIpAddress(),
+        cancellationToken);
             return program is null
                 ? NotFound(new { message = "Robot program not found." })
                 : Ok(program);
@@ -126,6 +131,10 @@ public sealed class RobotProgramsController : ControllerBase
         catch (InvalidOperationException exception)
         {
             return BadRequest(new { message = exception.Message });
+        }
+        catch (UnauthorizedAccessException exception)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new { message = exception.Message });
         }
     }
 
@@ -145,11 +154,11 @@ public sealed class RobotProgramsController : ControllerBase
         try
         {
             var program = await _programService.PublishAsync(
-                userId.Value,
-                robotId,
-                programId,
-                cancellationToken);
-
+     userId.Value,
+     robotId,
+     programId,
+     GetClientIpAddress(),
+     cancellationToken);
             return program is null
                 ? NotFound(new { message = "Robot program not found." })
                 : Ok(program);
@@ -157,6 +166,10 @@ public sealed class RobotProgramsController : ControllerBase
         catch (InvalidOperationException exception)
         {
             return BadRequest(new { message = exception.Message });
+        }
+        catch (UnauthorizedAccessException exception)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new { message = exception.Message });
         }
     }
 
@@ -172,17 +185,29 @@ public sealed class RobotProgramsController : ControllerBase
         var userId = GetCurrentUserId();
         if (userId is null) return Unauthorized(new { message = "Invalid access token." });
 
-        var archived = await _programService.ArchiveAsync(
-            userId.Value,
-            robotId,
-            programId,
-            cancellationToken);
+        try
+        {
+            var archived = await _programService.ArchiveAsync(
+        userId.Value,
+        robotId,
+        programId,
+        GetClientIpAddress(),
+        cancellationToken);
 
-        return archived
-            ? NoContent()
-            : NotFound(new { message = "Robot program not found." });
+            return archived
+                ? NoContent()
+                : NotFound(new { message = "Robot program not found." });
+        }
+        catch (UnauthorizedAccessException exception)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new { message = exception.Message });
+        }
     }
 
+    private string? GetClientIpAddress()
+    {
+        return HttpContext.Connection.RemoteIpAddress?.ToString();
+    }
     private Guid? GetCurrentUserId()
     {
         var value = User.FindFirstValue(ClaimTypes.NameIdentifier);

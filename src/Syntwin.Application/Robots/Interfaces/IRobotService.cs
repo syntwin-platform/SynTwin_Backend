@@ -12,6 +12,7 @@ public interface IRobotService
 
     Task<IReadOnlyList<RobotResponse>> GetMineAsync(
         Guid userId,
+        Guid? companyId = null,
         CancellationToken cancellationToken = default);
 
     Task<RobotResponse?> GetByIdAsync(
@@ -37,8 +38,8 @@ public interface IRobotService
         Guid robotId,
         string? ipAddress,
         CancellationToken cancellationToken = default);
-   Task<RobotLatestStateResponse?> GetLatestStateAsync(
-    Guid userId,
-    Guid robotId,
-    CancellationToken cancellationToken = default);
+    Task<RobotLatestStateResponse?> GetLatestStateAsync(
+     Guid userId,
+     Guid robotId,
+     CancellationToken cancellationToken = default);
 }

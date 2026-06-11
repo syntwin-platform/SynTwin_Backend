@@ -8,6 +8,8 @@ public sealed class Robot
 
     public Guid UserId { get; set; }
 
+    public Guid CompanyId { get; set; }
+
     public string RobotName { get; set; } = string.Empty;
 
     public string Model { get; set; } = string.Empty;
@@ -29,6 +31,8 @@ public sealed class Robot
     public DateTimeOffset? UpdatedAt { get; set; }
 
     public User? User { get; set; }
+
+    public Company? Company { get; set; }
 
     public ICollection<RobotCommand> Commands { get; set; } = new List<RobotCommand>();
 

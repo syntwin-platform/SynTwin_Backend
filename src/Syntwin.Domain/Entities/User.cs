@@ -31,4 +31,8 @@ public sealed class User
     public ICollection<UserSubscription> Subscriptions { get; set; } = new List<UserSubscription>();
 
     public ICollection<PaymentTransaction> PaymentTransactions { get; set; } = new List<PaymentTransaction>();
+
+    public ICollection<CompanyMember> CompanyMemberships { get; set; } = new List<CompanyMember>();
+
+    public ICollection<Company> CreatedCompanies { get; set; } = new List<Company>();
 }

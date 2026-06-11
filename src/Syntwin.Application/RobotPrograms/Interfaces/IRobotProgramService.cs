@@ -16,27 +16,31 @@ public interface IRobotProgramService
         CancellationToken cancellationToken = default);
 
     Task<RobotProgramResponse?> CreateAsync(
-        Guid userId,
-        Guid robotId,
-        CreateRobotProgramRequest request,
-        CancellationToken cancellationToken = default);
+     Guid userId,
+     Guid robotId,
+     CreateRobotProgramRequest request,
+     string? ipAddress,
+     CancellationToken cancellationToken = default);
 
     Task<RobotProgramResponse?> UpdateAsync(
         Guid userId,
         Guid robotId,
         Guid programId,
         UpdateRobotProgramRequest request,
+        string? ipAddress,
         CancellationToken cancellationToken = default);
 
     Task<RobotProgramResponse?> PublishAsync(
         Guid userId,
         Guid robotId,
         Guid programId,
+        string? ipAddress,
         CancellationToken cancellationToken = default);
 
     Task<bool> ArchiveAsync(
         Guid userId,
         Guid robotId,
         Guid programId,
+        string? ipAddress,
         CancellationToken cancellationToken = default);
 }

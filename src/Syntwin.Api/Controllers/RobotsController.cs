@@ -22,6 +22,7 @@ public sealed class RobotsController : ControllerBase
     [ProducesResponseType(typeof(IReadOnlyList<RobotResponse>), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     public async Task<ActionResult<IReadOnlyList<RobotResponse>>> GetMine(
+        [FromQuery] Guid? companyId,
         CancellationToken cancellationToken)
     {
         var userId = GetCurrentUserId();
@@ -31,7 +32,10 @@ public sealed class RobotsController : ControllerBase
             return Unauthorized(new { message = "Invalid access token." });
         }
 
-        var robots = await _robotService.GetMineAsync(userId.Value, cancellationToken);
+        var robots = await _robotService.GetMineAsync(
+            userId.Value,
+            companyId,
+            cancellationToken);
 
         return Ok(robots);
     }
@@ -118,6 +122,12 @@ public sealed class RobotsController : ControllerBase
         {
             return BadRequest(new { message = exception.Message });
         }
+        catch (UnauthorizedAccessException exception)
+        {
+            return StatusCode(
+                StatusCodes.Status403Forbidden,
+                new { message = exception.Message });
+        }
     }
 
     [HttpPut("{id:guid}")]
@@ -154,6 +164,12 @@ public sealed class RobotsController : ControllerBase
         {
             return BadRequest(new { message = exception.Message });
         }
+        catch (UnauthorizedAccessException exception)
+        {
+            return StatusCode(
+                StatusCodes.Status403Forbidden,
+                new { message = exception.Message });
+        }
     }
 
     [HttpDelete("{id:guid}")]
@@ -171,15 +187,24 @@ public sealed class RobotsController : ControllerBase
             return Unauthorized(new { message = "Invalid access token." });
         }
 
-        var disabled = await _robotService.DisableAsync(
-            userId.Value,
-            id,
-            GetClientIpAddress(),
-            cancellationToken);
+        try
+        {
+            var disabled = await _robotService.DisableAsync(
+                userId.Value,
+                id,
+                GetClientIpAddress(),
+                cancellationToken);
 
-        return disabled
-            ? NoContent()
-            : NotFound(new { message = "Robot not found." });
+            return disabled
+                ? NoContent()
+                : NotFound(new { message = "Robot not found." });
+        }
+        catch (UnauthorizedAccessException exception)
+        {
+            return StatusCode(
+                StatusCodes.Status403Forbidden,
+                new { message = exception.Message });
+        }
     }
 
     [HttpPost("{id:guid}/device-secret/reset")]
@@ -213,6 +238,12 @@ public sealed class RobotsController : ControllerBase
         catch (InvalidOperationException exception)
         {
             return BadRequest(new { message = exception.Message });
+        }
+        catch (UnauthorizedAccessException exception)
+        {
+            return StatusCode(
+                StatusCodes.Status403Forbidden,
+                new { message = exception.Message });
         }
     }
 

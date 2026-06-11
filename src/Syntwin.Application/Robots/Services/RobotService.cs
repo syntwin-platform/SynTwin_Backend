@@ -1,6 +1,8 @@
 using System.Security.Cryptography;
+using System.Text.Json;
 using Syntwin.Application.AuditLogs.Interfaces;
 using Syntwin.Application.Common.Interfaces;
+using Syntwin.Application.Companies.Interfaces;
 using Syntwin.Application.Robots.Dtos;
 using Syntwin.Application.Robots.Interfaces;
 using Syntwin.Application.Users.Interfaces;
@@ -16,19 +18,25 @@ public sealed class RobotService : IRobotService
     private readonly IPasswordHasher _passwordHasher;
     private readonly IAuditLogRepository _auditLogRepository;
     private readonly IRobotStateCache _robotStateCache;
+    private readonly IRobotAccessService _robotAccessService;
+    private readonly ICompanyRepository _companyRepository;
 
     public RobotService(
         IRobotRepository robotRepository,
         IUserRepository userRepository,
         IPasswordHasher passwordHasher,
         IAuditLogRepository auditLogRepository,
-        IRobotStateCache robotStateCache)
+        IRobotStateCache robotStateCache,
+        IRobotAccessService robotAccessService,
+        ICompanyRepository companyRepository)
     {
         _robotRepository = robotRepository;
         _userRepository = userRepository;
         _passwordHasher = passwordHasher;
         _auditLogRepository = auditLogRepository;
         _robotStateCache = robotStateCache;
+        _robotAccessService = robotAccessService;
+        _companyRepository = companyRepository;
     }
     public async Task<CreateRobotResponse> CreateAsync(
         Guid userId,
@@ -43,14 +51,47 @@ public sealed class RobotService : IRobotService
             throw new InvalidOperationException("User not found.");
         }
 
-        var plan = user.Subscriptions
+        if (request.CompanyId == Guid.Empty)
+        {
+            throw new InvalidOperationException("CompanyId is required.");
+        }
+
+        var role = await GetRoleAsync(userId, request.CompanyId, cancellationToken);
+
+        if (!role.HasValue)
+        {
+            throw new UnauthorizedAccessException(
+                "Active company membership is required to create robots.");
+        }
+
+        var company = await _companyRepository.GetByIdAsync(
+            request.CompanyId,
+            cancellationToken);
+
+        if (company is null || company.Status != CompanyStatus.Active)
+        {
+            throw new InvalidOperationException("Active company is required.");
+        }
+
+        var companyOwner = await _userRepository.GetByIdAsync(
+            company.CreatedByUserId,
+            cancellationToken);
+
+        if (companyOwner is null)
+        {
+            throw new InvalidOperationException("Company owner not found.");
+        }
+
+        var plan = companyOwner.Subscriptions
             .Where(subscription => subscription.Status == SubscriptionStatus.Active)
             .OrderByDescending(subscription => subscription.StartsAt)
             .Select(subscription => subscription.Plan)
             .FirstOrDefault();
 
         var maxRobots = plan?.MaxRobots ?? 1;
-        var currentRobotCount = await _robotRepository.CountActiveByUserIdAsync(userId, cancellationToken);
+        var currentRobotCount = await _robotRepository.CountActiveOwnedByUserIdAsync(
+            company.CreatedByUserId,
+            cancellationToken);
 
         if (currentRobotCount >= maxRobots)
         {
@@ -63,6 +104,7 @@ public sealed class RobotService : IRobotService
         {
             Id = Guid.NewGuid(),
             UserId = userId,
+            CompanyId = request.CompanyId,
             RobotName = request.RobotName.Trim(),
             Model = request.Model.Trim(),
             ConnectionType = string.IsNullOrWhiteSpace(request.ConnectionType)
@@ -83,6 +125,7 @@ public sealed class RobotService : IRobotService
             Action = "ROBOT_CREATED",
             IpAddress = NormalizeNullable(ipAddress),
             Message = $"Robot '{robot.RobotName}' was created.",
+            RawPayloadJson = CreateAuditContext(request.CompanyId, role.Value),
             CreatedAt = DateTimeOffset.UtcNow
         }, cancellationToken);
 
@@ -90,17 +133,26 @@ public sealed class RobotService : IRobotService
 
         return new CreateRobotResponse
         {
-            Robot = ToResponse(robot),
+            Robot = ToResponse(robot, role.Value),
             DeviceSecret = deviceSecret
         };
     }
 
     public async Task<IReadOnlyList<RobotResponse>> GetMineAsync(
         Guid userId,
+        Guid? companyId = null,
         CancellationToken cancellationToken = default)
     {
-        var robots = await _robotRepository.ListByUserIdAsync(userId, cancellationToken);
-        return robots.Select(ToResponse).ToList();
+        var roles = await _robotAccessService.ListCompanyRolesAsync(userId, cancellationToken);
+        var robots = await _robotRepository.ListAccessibleByUserIdAsync(
+            userId,
+            companyId,
+            cancellationToken);
+
+        return robots
+            .Where(robot => roles.ContainsKey(robot.CompanyId))
+            .Select(robot => ToResponse(robot, roles[robot.CompanyId]))
+            .ToList();
     }
 
     public async Task<RobotResponse?> GetByIdAsync(
@@ -110,12 +162,17 @@ public sealed class RobotService : IRobotService
     {
         var robot = await _robotRepository.GetByIdAsync(robotId, cancellationToken);
 
-        if (robot is null || robot.UserId != userId)
+        if (robot is null)
         {
             return null;
         }
 
-        return ToResponse(robot);
+        var role = await _robotAccessService.GetCompanyRoleAsync(
+            userId,
+            robot.CompanyId,
+            cancellationToken);
+
+        return role.HasValue ? ToResponse(robot, role.Value) : null;
     }
     public async Task<RobotLatestStateResponse?> GetLatestStateAsync(
     Guid userId,
@@ -124,7 +181,17 @@ public sealed class RobotService : IRobotService
     {
         var robot = await _robotRepository.GetByIdAsync(robotId, cancellationToken);
 
-        if (robot is null || robot.UserId != userId)
+        if (robot is null)
+        {
+            return null;
+        }
+
+        var role = await _robotAccessService.GetCompanyRoleAsync(
+            userId,
+            robot.CompanyId,
+            cancellationToken);
+
+        if (!role.HasValue)
         {
             return null;
         }
@@ -161,7 +228,13 @@ public sealed class RobotService : IRobotService
     {
         var robot = await _robotRepository.GetByIdAsync(robotId, cancellationToken);
 
-        if (robot is null || robot.UserId != userId)
+        if (robot is null)
+        {
+            return null;
+        }
+
+        var role = await GetRoleAsync(userId, robot.CompanyId, cancellationToken);
+        if (!role.HasValue)
         {
             return null;
         }
@@ -187,12 +260,13 @@ public sealed class RobotService : IRobotService
             Action = "ROBOT_UPDATED",
             IpAddress = NormalizeNullable(ipAddress),
             Message = $"Robot '{robot.RobotName}' was updated.",
+            RawPayloadJson = CreateAuditContext(robot.CompanyId, role.Value),
             CreatedAt = DateTimeOffset.UtcNow
         }, cancellationToken);
 
         await _robotRepository.SaveChangesAsync(cancellationToken);
 
-        return ToResponse(robot);
+        return ToResponse(robot, role.Value);
     }
 
     public async Task<bool> DisableAsync(
@@ -203,7 +277,13 @@ public sealed class RobotService : IRobotService
     {
         var robot = await _robotRepository.GetByIdAsync(robotId, cancellationToken);
 
-        if (robot is null || robot.UserId != userId)
+        if (robot is null)
+        {
+            return false;
+        }
+
+        var role = await GetRoleAsync(userId, robot.CompanyId, cancellationToken);
+        if (!role.HasValue)
         {
             return false;
         }
@@ -223,6 +303,7 @@ public sealed class RobotService : IRobotService
             Action = "ROBOT_DISABLED",
             IpAddress = NormalizeNullable(ipAddress),
             Message = $"Robot '{robot.RobotName}' was disabled.",
+            RawPayloadJson = CreateAuditContext(robot.CompanyId, role.Value),
             CreatedAt = DateTimeOffset.UtcNow
         }, cancellationToken);
 
@@ -239,7 +320,13 @@ public sealed class RobotService : IRobotService
     {
         var robot = await _robotRepository.GetByIdAsync(robotId, cancellationToken);
 
-        if (robot is null || robot.UserId != userId)
+        if (robot is null)
+        {
+            return null;
+        }
+
+        var role = await GetRoleAsync(userId, robot.CompanyId, cancellationToken);
+        if (!role.HasValue)
         {
             return null;
         }
@@ -262,6 +349,7 @@ public sealed class RobotService : IRobotService
             Action = "DEVICE_SECRET_RESET",
             IpAddress = NormalizeNullable(ipAddress),
             Message = $"Device secret for robot '{robot.RobotName}' was reset.",
+            RawPayloadJson = CreateAuditContext(robot.CompanyId, role.Value),
             CreatedAt = now
         }, cancellationToken);
 
@@ -275,12 +363,36 @@ public sealed class RobotService : IRobotService
         };
     }
 
-    private static RobotResponse ToResponse(Robot robot)
+    private Task<CompanyMemberRole?> GetRoleAsync(
+        Guid userId,
+        Guid companyId,
+        CancellationToken cancellationToken)
+    {
+        return _robotAccessService.GetCompanyRoleAsync(
+            userId,
+            companyId,
+            cancellationToken);
+    }
+
+    private static string CreateAuditContext(
+        Guid companyId,
+        CompanyMemberRole actorCompanyRole)
+    {
+        return JsonSerializer.Serialize(new
+        {
+            companyId,
+            actorCompanyRole = actorCompanyRole.ToString()
+        });
+    }
+
+    private static RobotResponse ToResponse(Robot robot, CompanyMemberRole role)
     {
         return new RobotResponse
         {
             Id = robot.Id,
             UserId = robot.UserId,
+            CompanyId = robot.CompanyId,
+            CurrentUserRole = role.ToString(),
             RobotName = robot.RobotName,
             Model = robot.Model,
             ConnectionType = robot.ConnectionType,
@@ -302,4 +414,5 @@ public sealed class RobotService : IRobotService
     {
         return string.IsNullOrWhiteSpace(value) ? null : value.Trim();
     }
+
 }

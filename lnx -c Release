@@ -1,0 +1,13 @@
+warning: in the working copy of 'ai-rules/06_DOCKER_RULES.md', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/Syntwin.Api/Hubs/TelemetryHub.cs', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/Syntwin.Api/appsettings.Development.json', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/Syntwin.Api/appsettings.json', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/Syntwin.Application/Robots/Dtos/CreateRobotRequest.cs', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/Syntwin.Application/Robots/Dtos/RobotResponse.cs', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/Syntwin.Application/Robots/Interfaces/IRobotRepository.cs', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/Syntwin.Application/Robots/Services/RobotService.cs', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/Syntwin.Domain/Entities/Robot.cs', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/Syntwin.Domain/Entities/User.cs', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/Syntwin.Infrastructure/DependencyInjection.cs', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/Syntwin.Infrastructure/Persistence/Repositories/RobotRepository.cs', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/Syntwin.Infrastructure/Persistence/SyntwinDbContext.cs', LF will be replaced by CRLF the next time Git touches it

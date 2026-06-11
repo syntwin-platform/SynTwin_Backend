@@ -6,6 +6,10 @@ public sealed class RobotResponse
 
     public Guid UserId { get; set; }
 
+    public Guid CompanyId { get; set; }
+
+    public string CurrentUserRole { get; set; } = string.Empty;
+
     public string RobotName { get; set; } = string.Empty;
 
     public string Model { get; set; } = string.Empty;

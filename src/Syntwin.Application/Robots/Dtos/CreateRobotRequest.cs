@@ -4,6 +4,8 @@ namespace Syntwin.Application.Robots.Dtos;
 
 public sealed class CreateRobotRequest
 {
+    public Guid CompanyId { get; set; }
+
     [Required]
     [MaxLength(100)]
     public string RobotName { get; set; } = string.Empty;

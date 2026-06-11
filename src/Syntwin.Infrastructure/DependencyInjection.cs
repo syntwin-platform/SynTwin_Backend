@@ -27,6 +27,10 @@ using Syntwin.Application.RobotPrograms.Interfaces;
 using Syntwin.Application.RobotPrograms.Services;
 using StackExchange.Redis;
 using Syntwin.Infrastructure.Robots;
+using Syntwin.Application.Companies.Interfaces;
+using Syntwin.Application.Companies.Services;
+using Syntwin.Application.AdminCompanies.Interfaces;
+using Syntwin.Application.AdminCompanies.Services;
 
 
 namespace Syntwin.Infrastructure;
@@ -95,6 +99,7 @@ public static class DependencyInjection
         services.AddScoped<IVnPayGateway, VnPayGateway>();
         services.AddScoped<IPaymentService, PaymentService>();
         services.AddScoped<IRobotRepository, RobotRepository>();
+        services.AddScoped<IRobotAccessService, RobotAccessService>();
         services.AddScoped<IRobotService, RobotService>();
         services.AddScoped<IAuditLogRepository, AuditLogRepository>();
         services.AddScoped<IRobotCommandRepository, RobotCommandRepository>();
@@ -102,6 +107,9 @@ public static class DependencyInjection
         services.AddScoped<IDeviceGatewayService, DeviceGatewayService>();
         services.AddScoped<IRobotProgramRepository, RobotProgramRepository>();
         services.AddScoped<IRobotProgramService, RobotProgramService>();
+        services.AddScoped<ICompanyRepository, CompanyRepository>();
+        services.AddScoped<ICompanyService, CompanyService>();
+        services.AddScoped<IAdminCompanyService, AdminCompanyService>();
         services.Configure<EmailOptions>(options =>
         {
             var emailSection = configuration.GetSection("Email");

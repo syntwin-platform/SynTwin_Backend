@@ -14,14 +14,28 @@ public sealed class RobotRepository : IRobotRepository
         _dbContext = dbContext;
     }
 
-    public async Task<IReadOnlyList<Robot>> ListByUserIdAsync(
+    public async Task<IReadOnlyList<Robot>> ListAccessibleByUserIdAsync(
         Guid userId,
+        Guid? companyId = null,
         CancellationToken cancellationToken = default)
     {
-        return await _dbContext.Robots
+        var query = _dbContext.Robots
             .Where(robot =>
-                robot.UserId == userId &&
+                _dbContext.CompanyMembers.Any(member =>
+                    member.CompanyId == robot.CompanyId &&
+                    member.UserId == userId &&
+                    member.IsActive &&
+                    member.Company != null &&
+                    member.Company.Status == CompanyStatus.Active) &&
                 robot.Status != RobotStatus.Disabled)
+            .AsQueryable();
+
+        if (companyId.HasValue)
+        {
+            query = query.Where(robot => robot.CompanyId == companyId.Value);
+        }
+
+        return await query
             .OrderByDescending(robot => robot.CreatedAt)
             .ToListAsync(cancellationToken);
     }
@@ -32,12 +46,20 @@ public sealed class RobotRepository : IRobotRepository
             .FirstOrDefaultAsync(robot => robot.Id == robotId, cancellationToken);
     }
 
-    public Task<int> CountActiveByUserIdAsync(Guid userId, CancellationToken cancellationToken = default)
+    public Task<int> CountActiveOwnedByUserIdAsync(
+        Guid ownerUserId,
+        CancellationToken cancellationToken = default)
     {
         return _dbContext.Robots
             .CountAsync(
                 robot =>
-                    robot.UserId == userId &&
+                    _dbContext.CompanyMembers.Any(member =>
+                        member.CompanyId == robot.CompanyId &&
+                        member.UserId == ownerUserId &&
+                        member.IsActive &&
+                        member.Role == CompanyMemberRole.Owner &&
+                        member.Company != null &&
+                        member.Company.Status == CompanyStatus.Active) &&
                     robot.Status != RobotStatus.Disabled,
                 cancellationToken);
     }

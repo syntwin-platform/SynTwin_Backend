@@ -10,10 +10,14 @@ namespace Syntwin.Api.Hubs;
 public sealed class TelemetryHub : Hub
 {
     private readonly IRobotRepository _robotRepository;
+    private readonly IRobotAccessService _robotAccessService;
 
-    public TelemetryHub(IRobotRepository robotRepository)
+    public TelemetryHub(
+        IRobotRepository robotRepository,
+        IRobotAccessService robotAccessService)
     {
         _robotRepository = robotRepository;
+        _robotAccessService = robotAccessService;
     }
 
     public async Task JoinRobotGroup(string robotId)
@@ -32,7 +36,16 @@ public sealed class TelemetryHub : Hub
 
         var robot = await _robotRepository.GetByIdAsync(parsedRobotId);
 
-        if (robot is null || robot.UserId != userId.Value)
+        if (robot is null)
+        {
+            throw new HubException("Robot not found or access denied.");
+        }
+
+        var role = await _robotAccessService.GetCompanyRoleAsync(
+            userId.Value,
+            robot.CompanyId);
+
+        if (!role.HasValue)
         {
             throw new HubException("Robot not found or access denied.");
         }
