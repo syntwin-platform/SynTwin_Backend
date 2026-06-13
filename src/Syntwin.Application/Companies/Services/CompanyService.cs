@@ -82,6 +82,7 @@ public sealed class CompanyService : ICompanyService
             LogoUrl = NormalizeNullable(request.LogoUrl),
             Status = CompanyStatus.Active,
             CreatedByUserId = userId,
+            CreatedByUser = user,
             CreatedAt = now
         };
 
@@ -464,9 +465,17 @@ public sealed class CompanyService : ICompanyService
     }
 
     private static CompanyResponse ToCompanyResponse(
-        Company company,
-        CompanyMemberRole currentUserRole)
+    Company company,
+    CompanyMemberRole currentUserRole)
     {
+        var activePlan = company.CreatedByUser?
+            .Subscriptions
+            .Where(subscription =>
+                subscription.Status == SubscriptionStatus.Active)
+            .OrderByDescending(subscription => subscription.StartsAt)
+            .Select(subscription => subscription.Plan)
+            .FirstOrDefault(plan => plan is not null);
+
         return new CompanyResponse
         {
             Id = company.Id,
@@ -479,6 +488,13 @@ public sealed class CompanyService : ICompanyService
             Status = company.Status.ToString(),
             CurrentUserRole = currentUserRole.ToString(),
             MemberCount = company.Members.Count(member => member.IsActive),
+            SubscriptionPlan =
+                activePlan?.Code.ToString() ??
+                SubscriptionPlanCode.Free.ToString(),
+            MaxRobots = activePlan?.MaxRobots ?? 1,
+            CanView3D = activePlan?.CanView3D ?? false,
+            CanSendCommand =
+                activePlan?.CanSendCommand ?? false,
             CreatedAt = company.CreatedAt
         };
     }

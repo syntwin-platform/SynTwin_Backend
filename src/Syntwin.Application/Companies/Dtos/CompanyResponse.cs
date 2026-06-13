@@ -22,5 +22,13 @@ public sealed class CompanyResponse
 
     public int MemberCount { get; set; }
 
+    public string SubscriptionPlan { get; set; } = string.Empty;
+
+    public int MaxRobots { get; set; }
+
+    public bool CanView3D { get; set; }
+
+    public bool CanSendCommand { get; set; }
+
     public DateTimeOffset CreatedAt { get; set; }
 }

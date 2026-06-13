@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Syntwin.Application.Companies.Interfaces;
 using Syntwin.Domain.Entities;
+using Syntwin.Domain.Enums;
 
 namespace Syntwin.Infrastructure.Persistence;
 
@@ -22,8 +23,17 @@ public sealed class CompanyRepository : ICompanyRepository
             .Include(member => member.Company)
                 .ThenInclude(company => company!.Members)
                 .ThenInclude(member => member.User)
-            .Where(member => member.UserId == userId && member.IsActive)
+            .Include(member => member.Company)
+                .ThenInclude(company => company!.CreatedByUser)
+                .ThenInclude(owner => owner!.Subscriptions
+                    .Where(subscription =>
+                        subscription.Status == SubscriptionStatus.Active))
+                .ThenInclude(subscription => subscription.Plan)
+            .Where(member =>
+                member.UserId == userId &&
+                member.IsActive)
             .OrderBy(member => member.Company!.Name)
+            .AsSplitQuery()
             .ToListAsync(cancellationToken);
     }
 
@@ -34,11 +44,18 @@ public sealed class CompanyRepository : ICompanyRepository
         var query = _dbContext.Companies
             .Include(company => company.Members)
                 .ThenInclude(member => member.User)
+            .Include(company => company.CreatedByUser)
+                .ThenInclude(owner => owner!.Subscriptions
+                    .Where(subscription =>
+                        subscription.Status == SubscriptionStatus.Active))
+                .ThenInclude(subscription => subscription.Plan)
+            .AsSplitQuery()
             .AsQueryable();
 
         if (!string.IsNullOrWhiteSpace(search))
         {
             var keyword = search.Trim();
+
             query = query.Where(company =>
                 company.Name.Contains(keyword) ||
                 company.Slug.Contains(keyword) ||
@@ -61,7 +78,15 @@ public sealed class CompanyRepository : ICompanyRepository
         return _dbContext.Companies
             .Include(company => company.Members)
                 .ThenInclude(member => member.User)
-            .FirstOrDefaultAsync(company => company.Id == companyId, cancellationToken);
+            .Include(company => company.CreatedByUser)
+                .ThenInclude(owner => owner!.Subscriptions
+                    .Where(subscription =>
+                        subscription.Status == SubscriptionStatus.Active))
+                .ThenInclude(subscription => subscription.Plan)
+            .AsSplitQuery()
+            .FirstOrDefaultAsync(
+                company => company.Id == companyId,
+                cancellationToken);
     }
 
     public Task<CompanyMember?> GetMembershipAsync(
@@ -73,7 +98,14 @@ public sealed class CompanyRepository : ICompanyRepository
             .Include(member => member.Company)
                 .ThenInclude(company => company!.Members)
                 .ThenInclude(member => member.User)
+            .Include(member => member.Company)
+                .ThenInclude(company => company!.CreatedByUser)
+                .ThenInclude(owner => owner!.Subscriptions
+                    .Where(subscription =>
+                        subscription.Status == SubscriptionStatus.Active))
+                .ThenInclude(subscription => subscription.Plan)
             .Include(member => member.User)
+            .AsSplitQuery()
             .FirstOrDefaultAsync(
                 member =>
                     member.CompanyId == companyId &&
@@ -90,7 +122,8 @@ public sealed class CompanyRepository : ICompanyRepository
         return _dbContext.Companies.AnyAsync(
             company =>
                 company.Slug == slug &&
-                (!excludedCompanyId.HasValue || company.Id != excludedCompanyId.Value),
+                (!excludedCompanyId.HasValue ||
+                 company.Id != excludedCompanyId.Value),
             cancellationToken);
     }
 
@@ -98,17 +131,22 @@ public sealed class CompanyRepository : ICompanyRepository
         Company company,
         CancellationToken cancellationToken = default)
     {
-        await _dbContext.Companies.AddAsync(company, cancellationToken);
+        await _dbContext.Companies.AddAsync(
+            company,
+            cancellationToken);
     }
 
     public async Task AddMemberAsync(
         CompanyMember member,
         CancellationToken cancellationToken = default)
     {
-        await _dbContext.CompanyMembers.AddAsync(member, cancellationToken);
+        await _dbContext.CompanyMembers.AddAsync(
+            member,
+            cancellationToken);
     }
 
-    public Task SaveChangesAsync(CancellationToken cancellationToken = default)
+    public Task SaveChangesAsync(
+        CancellationToken cancellationToken = default)
     {
         return _dbContext.SaveChangesAsync(cancellationToken);
     }
