@@ -71,6 +71,12 @@ public sealed class RobotCommandService : IRobotCommandService
             throw new UnauthorizedAccessException("Super Admin cannot control customer robots.");
         }
 
+        if (robot.Status == RobotStatus.Disabled)
+        {
+            throw new InvalidOperationException(
+                "Disabled robot cannot receive commands.");
+        }
+
         var company = await _companyRepository.GetByIdAsync(
      robot.CompanyId,
      cancellationToken);

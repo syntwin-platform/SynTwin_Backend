@@ -203,7 +203,10 @@ public sealed class RobotService : IRobotService
         if (latest is not null)
         {
             latest.IsOnline = isOnline;
-            latest.Status = isOnline ? RobotStatus.Online.ToString() : latest.Status;
+            latest.Status = ResolveLatestStatus(
+                robot.Status,
+                latest.Status,
+                isOnline);
             latest.LastSeenAt = redisLastSeenAt ?? latest.LastSeenAt;
             latest.Source = "Redis";
 
@@ -405,6 +408,28 @@ public sealed class RobotService : IRobotService
         };
     }
 
+    private static string ResolveLatestStatus(
+    RobotStatus persistedStatus,
+    string cachedStatus,
+    bool isOnline)
+    {
+        if (isOnline)
+        {
+            return RobotStatus.Online.ToString();
+        }
+
+        if (persistedStatus == RobotStatus.Disabled)
+        {
+            return RobotStatus.Disabled.ToString();
+        }
+
+        return string.Equals(
+            cachedStatus,
+            RobotStatus.Online.ToString(),
+            StringComparison.OrdinalIgnoreCase)
+            ? RobotStatus.Offline.ToString()
+            : cachedStatus;
+    }
     private static string CreateDeviceSecret()
     {
         return $"sk_robot_{RandomNumberGenerator.GetHexString(32).ToLowerInvariant()}";

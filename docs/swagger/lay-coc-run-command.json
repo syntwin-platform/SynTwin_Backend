@@ -1,0 +1,6 @@
+{
+  "commandType": "RunProgram",
+  "payload": {
+    "programId": "<programId-from-create-response>"
+  }
+}
