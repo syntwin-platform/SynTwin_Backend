@@ -153,6 +153,12 @@ builder.Services.AddRateLimiter(options =>
 });
 var app = builder.Build();
 
+using (var scope = app.Services.CreateScope())
+{
+    var dbContext = scope.ServiceProvider.GetRequiredService<Syntwin.Infrastructure.Persistence.SyntwinDbContext>();
+    await Microsoft.EntityFrameworkCore.RelationalDatabaseFacadeExtensions.MigrateAsync(dbContext.Database);
+}
+
 await app.Services.SeedSuperAdminAsync(app.Configuration);
 
 // Configure the HTTP request pipeline.

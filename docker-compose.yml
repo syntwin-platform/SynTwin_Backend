@@ -1,6 +1,25 @@
 name: syntwin
 
 services:
+  syntwin-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: syntwin-api
+    ports:
+      - "5000:8080"
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Development
+      - ConnectionStrings__SyntwinDb=Server=syntwin-sqlserver;Database=SyntwinDb;User=sa;Password=${SQLSERVER_SA_PASSWORD};TrustServerCertificate=True
+      - Redis__ConnectionString=syntwin-redis:6379
+      - Jwt__SigningKey=${JWT_SIGNING_KEY}
+      - Seed__SuperAdmin__Password=${SUPERADMIN_PASSWORD}
+    depends_on:
+      - syntwin-sqlserver
+      - syntwin-redis
+    networks:
+      - syntwin_network
+
   syntwin-sqlserver:
     image: mcr.microsoft.com/mssql/server:2022-latest
     container_name: syntwin-sqlserver
