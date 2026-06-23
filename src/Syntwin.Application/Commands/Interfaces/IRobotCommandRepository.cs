@@ -1,5 +1,5 @@
 ﻿using Syntwin.Domain.Entities;
-using Syntwin.Domain.Enums;
+
 
 namespace Syntwin.Application.Commands.Interfaces;
 
@@ -13,10 +13,9 @@ public interface IRobotCommandRepository
 
     Task SaveChangesAsync(CancellationToken cancellationToken = default);
 
-    Task<RobotCommand?> TakeNextPendingAsync(
-     Guid robotId,
-     bool safetyOnly = false,
-     CancellationToken cancellationToken = default);
+    Task<RobotCommand?> GetByIdAsync(
+    Guid commandId,
+    CancellationToken cancellationToken = default);
 
     Task<RobotCommand?> GetByIdForRobotAsync(
         Guid commandId,
@@ -30,8 +29,4 @@ public interface IRobotCommandRepository
     Task AddCommandResultAsync(
         CommandResult result,
         CancellationToken cancellationToken = default);
-
-    Task<IReadOnlyList<RobotCommand>> ListExpiredActiveCommandsAsync(
-    DateTimeOffset now,
-    CancellationToken cancellationToken = default);
 }

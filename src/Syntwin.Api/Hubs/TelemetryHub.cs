@@ -11,13 +11,16 @@ public sealed class TelemetryHub : Hub
 {
     private readonly IRobotRepository _robotRepository;
     private readonly IRobotAccessService _robotAccessService;
-
+    private readonly IRobotStateCache _robotStateCache;
+    private static readonly TimeSpan TelemetryViewerTtl = TimeSpan.FromHours(2);
     public TelemetryHub(
-        IRobotRepository robotRepository,
-        IRobotAccessService robotAccessService)
+    IRobotRepository robotRepository,
+    IRobotAccessService robotAccessService,
+    IRobotStateCache robotStateCache)
     {
         _robotRepository = robotRepository;
         _robotAccessService = robotAccessService;
+        _robotStateCache = robotStateCache;
     }
 
     public async Task JoinRobotGroup(string robotId)
@@ -58,6 +61,11 @@ public sealed class TelemetryHub : Hub
         await Groups.AddToGroupAsync(
             Context.ConnectionId,
             GetRobotGroupName(parsedRobotId));
+
+        await _robotStateCache.AddTelemetryViewerAsync(
+    parsedRobotId,
+    Context.ConnectionId,
+    TelemetryViewerTtl);
     }
 
     public async Task LeaveRobotGroup(string robotId)
@@ -70,6 +78,18 @@ public sealed class TelemetryHub : Hub
         await Groups.RemoveFromGroupAsync(
             Context.ConnectionId,
             GetRobotGroupName(parsedRobotId));
+
+        await _robotStateCache.RemoveTelemetryViewerAsync(
+    parsedRobotId,
+    Context.ConnectionId);
+    }
+
+    public override async Task OnDisconnectedAsync(Exception? exception)
+    {
+        await _robotStateCache.ClearTelemetryViewerConnectionAsync(
+            Context.ConnectionId);
+
+        await base.OnDisconnectedAsync(exception);
     }
 
     public static string GetRobotGroupName(Guid robotId)

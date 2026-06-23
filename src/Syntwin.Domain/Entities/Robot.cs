@@ -41,4 +41,5 @@ public sealed class Robot
     public ICollection<AuditLog> AuditLogs { get; set; } = new List<AuditLog>();
 
     public ICollection<RobotProgram> Programs { get; set; } = new List<RobotProgram>();
+    public ICollection<RobotRuntimeSession> RuntimeSessions { get; set; } = new List<RobotRuntimeSession>();
 }

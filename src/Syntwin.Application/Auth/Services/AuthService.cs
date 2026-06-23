@@ -63,15 +63,13 @@ public sealed class AuthService : IAuthService
 
         var subscription = new UserSubscription
         {
-            Id = Guid.NewGuid(),
             UserId = user.Id,
             PlanId = freePlan.Id,
             Status = SubscriptionStatus.Active,
             StartsAt = now,
             AutoRenew = false,
             CreatedAt = now,
-            User = user,
-            Plan = freePlan
+            User = user
         };
 
         user.Subscriptions.Add(subscription);

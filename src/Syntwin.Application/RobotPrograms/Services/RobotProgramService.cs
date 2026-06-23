@@ -1,12 +1,13 @@
-﻿using System.Text.Json;
+﻿using Syntwin.Application.AuditLogs.Interfaces;
+using Syntwin.Application.Realtime.Dtos;
+using Syntwin.Application.Realtime.Interfaces;
 using Syntwin.Application.RobotPrograms.Dtos;
 using Syntwin.Application.RobotPrograms.Interfaces;
 using Syntwin.Application.Robots.Interfaces;
 using Syntwin.Domain.Entities;
 using Syntwin.Domain.Enums;
-using Syntwin.Application.Realtime.Dtos;
-using Syntwin.Application.Realtime.Interfaces;
-using Syntwin.Application.AuditLogs.Interfaces;
+using System.Globalization;
+using System.Text.Json;
 
 namespace Syntwin.Application.RobotPrograms.Services;
 
@@ -70,6 +71,43 @@ public sealed class RobotProgramService : IRobotProgramService
             cancellationToken);
 
         return program is null ? null : ToResponse(program);
+    }
+
+    public async Task<LuaExportResponse?> ExportLuaAsync(
+    Guid userId,
+    Guid robotId,
+    Guid programId,
+    CancellationToken cancellationToken = default)
+    {
+        var robot = await _robotRepository.GetByIdAsync(robotId, cancellationToken);
+
+        if (robot is null ||
+            !await HasAccessAsync(userId, robot.CompanyId, cancellationToken))
+        {
+            return null;
+        }
+
+        var program = await _programRepository.GetByIdForRobotAsync(
+            robotId,
+            programId,
+            cancellationToken);
+
+        if (program is null)
+        {
+            return null;
+        }
+
+        var exportedAt = DateTimeOffset.UtcNow;
+
+        return new LuaExportResponse
+        {
+            RobotId = robotId,
+            ProgramId = program.Id,
+            ProgramName = program.Name,
+            FileName = CreateLuaFileName(program.Name),
+            LuaContent = GenerateLua(program, robot, exportedAt),
+            ExportedAt = exportedAt
+        };
     }
 
     public async Task<RobotProgramResponse?> CreateAsync(
@@ -250,7 +288,7 @@ cancellationToken);
         {
             throw new InvalidOperationException("Program must have at least one step before publishing.");
         }
-
+        EnsureProgramCanBePublished(program);
         program.Status = RobotProgramStatus.Published;
         program.UpdatedAt = DateTimeOffset.UtcNow;
         await AddProgramAuditAsync(
@@ -321,6 +359,224 @@ cancellationToken);
     ToProgramUpdatedEvent(program, "Archived"),
     cancellationToken);
         return true;
+    }
+
+    private static string CreateLuaFileName(string programName)
+    {
+        var safeName = new string(
+            programName
+                .Trim()
+                .Select(character =>
+                    char.IsLetterOrDigit(character) ||
+                    character is '-' or '_'
+                        ? character
+                        : '_')
+                .ToArray());
+
+        if (string.IsNullOrWhiteSpace(safeName))
+        {
+            safeName = "robot_program";
+        }
+
+        return $"{safeName}.lua";
+    }
+
+    private static string ToLuaDouble(double value, int decimals = 3)
+    {
+        return $"toDouble(\"{value.ToString($"F{decimals}", CultureInfo.InvariantCulture)}\")";
+    }
+
+    private static JsonElement ReadStepPayload(RobotProgramStep step)
+    {
+        return string.IsNullOrWhiteSpace(step.PayloadJson)
+            ? JsonSerializer.Deserialize<JsonElement>("{}")
+            : JsonSerializer.Deserialize<JsonElement>(step.PayloadJson);
+    }
+
+    private static double RequireLuaNumber(JsonElement payload, string propertyName, RobotProgramStep step)
+    {
+        if (!payload.TryGetProperty(propertyName, out var value) ||
+            value.ValueKind != JsonValueKind.Number)
+        {
+            throw new InvalidOperationException(
+                $"Cannot export step {step.OrderIndex} '{step.Label}' because payload.{propertyName} is missing or not numeric.");
+        }
+
+        return value.GetDouble();
+    }
+
+    private static JsonElement RequireLuaObject(JsonElement payload, string propertyName, RobotProgramStep step)
+    {
+        if (!payload.TryGetProperty(propertyName, out var value) ||
+            value.ValueKind != JsonValueKind.Object)
+        {
+            throw new InvalidOperationException(
+                $"Cannot export step {step.OrderIndex} '{step.Label}' because payload.{propertyName} is missing or not an object.");
+        }
+
+        return value;
+    }
+
+    private static string CreateMoveJLua(RobotProgramStep step, JsonElement payload)
+    {
+        if (!payload.TryGetProperty("jointAngles", out var jointAngles) ||
+            jointAngles.ValueKind != JsonValueKind.Array ||
+            jointAngles.GetArrayLength() != 6)
+        {
+            throw new InvalidOperationException(
+                $"Cannot export step {step.OrderIndex} '{step.Label}' because jointAngles must contain exactly 6 values.");
+        }
+
+        var values = jointAngles
+            .EnumerateArray()
+            .Select(value => ToLuaDouble(value.GetDouble()))
+            .ToArray();
+
+        var speed = payload.TryGetProperty("speed", out var speedElement) &&
+            speedElement.ValueKind == JsonValueKind.Number
+                ? speedElement.GetDouble()
+                : 30;
+
+        var acc = payload.TryGetProperty("acc", out var accElement) &&
+            accElement.ValueKind == JsonValueKind.Number
+                ? accElement.GetDouble()
+                : speed;
+
+        return $"MoveJ({{{string.Join(", ", values)}}}, 0, 0, {ToLuaDouble(speed, 1)}, {ToLuaDouble(acc, 1)}, toDouble(\"-1.0\"), toDouble(\"-1.0\"))";
+    }
+
+    private static string CreateMoveLLua(RobotProgramStep step, JsonElement payload)
+    {
+        var tcpPose = RequireLuaObject(payload, "tcpPose", step);
+
+        var values = new[]
+        {
+        ToLuaDouble(RequireLuaNumber(tcpPose, "x", step)),
+        ToLuaDouble(RequireLuaNumber(tcpPose, "y", step)),
+        ToLuaDouble(RequireLuaNumber(tcpPose, "z", step)),
+        ToLuaDouble(RequireLuaNumber(tcpPose, "rx", step)),
+        ToLuaDouble(RequireLuaNumber(tcpPose, "ry", step)),
+        ToLuaDouble(RequireLuaNumber(tcpPose, "rz", step))
+    };
+
+        var speed = payload.TryGetProperty("speed", out var speedElement) &&
+            speedElement.ValueKind == JsonValueKind.Number
+                ? speedElement.GetDouble()
+                : 30;
+
+        var acc = payload.TryGetProperty("acc", out var accElement) &&
+            accElement.ValueKind == JsonValueKind.Number
+                ? accElement.GetDouble()
+                : speed;
+
+        return $"MoveL({{{string.Join(", ", values)}}}, 0, 0, {ToLuaDouble(speed, 1)}, {ToLuaDouble(acc, 1)}, toDouble(\"-1.0\"), toDouble(\"-1.0\"))";
+    }
+
+    private static string CreateRotateJointLua(RobotProgramStep step, JsonElement payload)
+    {
+        return CreateMoveJLua(step, payload);
+    }
+
+    private static string CreateWaitMsLua(RobotProgramStep step, JsonElement payload)
+    {
+        var delayMs = RequireLuaNumber(payload, "delayMs", step);
+        return $"WaitMs({Math.Max(0, (int)Math.Round(delayMs))})";
+    }
+
+    private static string CreateSetDoLua(RobotProgramStep step, JsonElement payload)
+    {
+        var doType = payload.TryGetProperty("doType", out var doTypeElement) &&
+            doTypeElement.ValueKind == JsonValueKind.String
+                ? doTypeElement.GetString()
+                : "cabinet";
+
+        var doIndex = (int)Math.Round(RequireLuaNumber(payload, "doIndex", step));
+        var doValue = (int)Math.Round(RequireLuaNumber(payload, "doValue", step));
+
+        return string.Equals(doType, "tool", StringComparison.OrdinalIgnoreCase)
+            ? $"SetToolDO({doIndex}, {doValue}, 0, 0)"
+            : $"SetDO({doIndex}, {doValue}, 0)";
+    }
+
+    private static string GenerateLua(
+    RobotProgram program,
+    Robot robot,
+    DateTimeOffset exportedAt)
+    {
+        var lines = new List<string>
+    {
+        "-- ============================================",
+        "-- Generated by SynTwin Backend",
+        $"-- Program Name : {program.Name}",
+        $"-- Robot Model  : {robot.Model}",
+        $"-- Date         : {exportedAt:yyyy-MM-dd}",
+        "-- Note         : Backend-generated LUA export",
+        "-- ============================================",
+        string.Empty,
+        "-- [Utility] Safe string-to-double converter.",
+        "local function toDouble(v)",
+        "    return tonumber(tostring(v)) + 0.0",
+        "end",
+        string.Empty
+    };
+
+        foreach (var step in program.Steps.OrderBy(step => step.OrderIndex))
+        {
+            lines.Add($"-- [Step {step.OrderIndex}] {step.Label}");
+
+            var payload = ReadStepPayload(step);
+
+            switch (step.StepType)
+            {
+                case RobotProgramStepType.MoveJ:
+                    lines.Add(CreateMoveJLua(step, payload));
+                    break;
+
+                case RobotProgramStepType.MoveL:
+                case RobotProgramStepType.MoveTCP:
+                    lines.Add(CreateMoveLLua(step, payload));
+                    break;
+
+                case RobotProgramStepType.RotateJoint:
+                    lines.Add(CreateRotateJointLua(step, payload));
+                    break;
+
+                case RobotProgramStepType.WaitMs:
+                    lines.Add(CreateWaitMsLua(step, payload));
+                    break;
+
+                case RobotProgramStepType.SetDO:
+                    lines.Add(CreateSetDoLua(step, payload));
+                    break;
+
+                case RobotProgramStepType.GripperOpen:
+                    lines.Add("gripperOpen()");
+                    break;
+
+                case RobotProgramStepType.GripperClose:
+                    lines.Add("gripperClose()");
+                    break;
+
+                case RobotProgramStepType.Comment:
+                    lines.Add("-- Comment only.");
+                    break;
+
+                case RobotProgramStepType.CustomCommand:
+                case RobotProgramStepType.SetAO:
+                    throw new InvalidOperationException(
+                        $"Cannot export step {step.OrderIndex} '{step.Label}' because {step.StepType} is not supported for LUA export.");
+
+                default:
+                    throw new InvalidOperationException(
+                        $"Cannot export step {step.OrderIndex} '{step.Label}' because {step.StepType} is not supported.");
+            }
+
+            lines.Add(string.Empty);
+        }
+
+        lines.Add("-- End of program.");
+
+        return string.Join(Environment.NewLine, lines);
     }
 
     private static void ValidateSteps(IReadOnlyList<RobotProgramStepRequest> steps)
@@ -394,8 +650,30 @@ cancellationToken);
                 RequirePayloadObject(payload, $"{stepType} step at order index {orderIndex}");
                 break;
 
+            case RobotProgramStepType.CustomCommand:
+                ValidateCustomCommandStepPayload(payload, orderIndex);
+                break;
+
+            case RobotProgramStepType.SetAO:
+                ValidateSetAoStepPayload(payload, orderIndex);
+                break;
+
             default:
                 throw new InvalidOperationException($"Unsupported step type: {stepType}.");
+        }
+    }
+
+    private static void ValidateSetAoStepPayload(JsonElement payload, int orderIndex)
+    {
+        var payloadObject = RequirePayloadObject(payload, $"SetAO step at order index {orderIndex}");
+
+        var aoIndex = RequireInt(payloadObject, "aoIndex", $"SetAO step at order index {orderIndex}");
+        RequireNumber(payloadObject, "aoValue", $"SetAO step at order index {orderIndex}");
+
+        if (aoIndex is < 0 or > 1)
+        {
+            throw new InvalidOperationException(
+                $"SetAO step at order index {orderIndex} aoIndex must be between 0 and 1.");
         }
     }
 
@@ -808,6 +1086,43 @@ cancellationToken);
         }, cancellationToken);
     }
 
+    private static void EnsureProgramCanBePublished(RobotProgram program)
+    {
+        var unsupportedStep = program.Steps
+            .OrderBy(step => step.OrderIndex)
+            .FirstOrDefault(step => step.StepType == RobotProgramStepType.CustomCommand);
+
+        if (unsupportedStep is not null)
+        {
+            throw new InvalidOperationException(
+                $"Program cannot be published because step {unsupportedStep.OrderIndex} '{unsupportedStep.Label}' is a CustomCommand. Edit or remove unsupported LUA commands before publishing.");
+        }
+
+        var unsupportedSetAoStep = program.Steps
+            .OrderBy(step => step.OrderIndex)
+            .FirstOrDefault(step => step.StepType == RobotProgramStepType.SetAO);
+
+        if (unsupportedSetAoStep is not null)
+        {
+            throw new InvalidOperationException(
+                $"Program cannot be published because step {unsupportedSetAoStep.OrderIndex} '{unsupportedSetAoStep.Label}' is SetAO. SetAO import is preserved in Draft, but execution is not supported yet.");
+        }
+    }
+
+    private static void ValidateCustomCommandStepPayload(JsonElement payload, int orderIndex)
+    {
+        var payloadObject = RequirePayloadObject(payload, $"CustomCommand step at order index {orderIndex}");
+
+        RequireString(payloadObject, "raw", $"CustomCommand step at order index {orderIndex}");
+        RequireString(payloadObject, "commandName", $"CustomCommand step at order index {orderIndex}");
+
+        if (payloadObject.TryGetProperty("args", out var args) &&
+            args.ValueKind != JsonValueKind.Array)
+        {
+            throw new InvalidOperationException(
+                $"CustomCommand step at order index {orderIndex} args must be an array when present.");
+        }
+    }
     private static string? NormalizeNullable(string? value)
     {
         return string.IsNullOrWhiteSpace(value)

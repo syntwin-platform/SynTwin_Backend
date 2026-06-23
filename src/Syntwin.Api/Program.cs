@@ -10,6 +10,12 @@ using Syntwin.Api.Hubs;
 using Syntwin.Api.Realtime;
 using Syntwin.Application.Realtime.Interfaces;
 using Syntwin.Api.BackgroundServices;
+using StackExchange.Redis;
+using System.Text.Json;
+using Microsoft.AspNetCore.Diagnostics.HealthChecks;
+using Microsoft.Extensions.Diagnostics.HealthChecks;
+using Syntwin.Api.HealthChecks;
+
 
 const string CorsPolicyName = "SyntwinCors";
 var builder = WebApplication.CreateBuilder(args);
@@ -17,11 +23,24 @@ var builder = WebApplication.CreateBuilder(args);
 // Add services to the container.
 
 builder.Services.AddControllers();
-builder.Services.AddSignalR();
+var redisConnectionString = builder.Configuration["Redis:ConnectionString"];
+
+if (string.IsNullOrWhiteSpace(redisConnectionString))
+{
+    throw new InvalidOperationException("Redis connection string is required.");
+}
+
+builder.Services
+    .AddSignalR()
+    .AddStackExchangeRedis(redisConnectionString, options =>
+    {
+        options.Configuration.ChannelPrefix = RedisChannel.Literal("syntwin:signalr");
+    });
 
 builder.Services.AddScoped<IRobotRealtimeNotifier, SignalRRobotRealtimeNotifier>();
 builder.Services.AddHostedService<RobotOfflineMonitorService>();
 builder.Services.AddHostedService<RobotCommandTimeoutMonitorService>();
+builder.Services.AddHostedService<RobotLastSeenFlushService>();
 
 var allowedOrigins = builder.Configuration
     .GetSection("Cors:AllowedOrigins")
@@ -97,6 +116,10 @@ builder.Services.AddSwaggerGen(options =>
     });
 });
 builder.Services.AddInfrastructure(builder.Configuration);
+builder.Services
+    .AddHealthChecks()
+    .AddCheck<SyntwinDbHealthCheck>("sqlserver")
+    .AddCheck<RedisHealthCheck>("redis");
 var jwtSection = builder.Configuration.GetSection("Jwt");
 var signingKey = jwtSection["SigningKey"] ?? string.Empty;
 
@@ -156,12 +179,14 @@ var app = builder.Build();
 await app.Services.SeedSuperAdminAsync(app.Configuration);
 
 // Configure the HTTP request pipeline.
-if (app.Environment.IsDevelopment())
+var swaggerEnabled = app.Environment.IsDevelopment() ||
+                     app.Configuration.GetValue<bool>("Swagger:Enabled");
+
+if (swaggerEnabled)
 {
     app.UseSwagger();
     app.UseSwaggerUI();
 }
-
 app.UseHttpsRedirection();
 app.UseCors(CorsPolicyName);
 
@@ -170,4 +195,29 @@ app.UseAuthorization();
 app.UseRateLimiter();
 app.MapControllers();
 app.MapHub<TelemetryHub>("/hubs/telemetry");
+app.MapHealthChecks("/health/live", new HealthCheckOptions
+{
+    Predicate = _ => false
+});
+
+app.MapHealthChecks("/health/ready", new HealthCheckOptions
+{
+    ResponseWriter = async (context, report) =>
+    {
+        context.Response.ContentType = "application/json";
+
+        var payload = new
+        {
+            status = report.Status.ToString(),
+            checks = report.Entries.Select(entry => new
+            {
+                name = entry.Key,
+                status = entry.Value.Status.ToString(),
+                description = entry.Value.Description
+            })
+        };
+
+        await context.Response.WriteAsync(JsonSerializer.Serialize(payload));
+    }
+});
 app.Run();

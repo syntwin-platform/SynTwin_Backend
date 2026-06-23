@@ -90,6 +90,31 @@ public sealed class RobotsController : ControllerBase
             : Ok(state);
     }
 
+    [HttpGet("{id:guid}/runtime-config")]
+    [ProducesResponseType(typeof(RobotRuntimeConfigResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<RobotRuntimeConfigResponse>> GetRuntimeConfig(
+    Guid id,
+    CancellationToken cancellationToken)
+    {
+        var userId = GetCurrentUserId();
+
+        if (userId is null)
+        {
+            return Unauthorized(new { message = "Invalid access token." });
+        }
+
+        var runtimeConfig = await _robotService.GetRuntimeConfigAsync(
+            userId.Value,
+            id,
+            cancellationToken);
+
+        return runtimeConfig is null
+            ? NotFound(new { message = "Robot not found." })
+            : Ok(runtimeConfig);
+    }
+
     [HttpPost]
     [ProducesResponseType(typeof(CreateRobotResponse), StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]

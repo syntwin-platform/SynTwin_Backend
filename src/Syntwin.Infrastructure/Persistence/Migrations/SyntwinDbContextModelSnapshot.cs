@@ -17,7 +17,7 @@ namespace Syntwin.Infrastructure.Persistence.Migrations
         {
 #pragma warning disable 612, 618
             modelBuilder
-                .HasAnnotation("ProductVersion", "9.0.16")
+                .HasAnnotation("ProductVersion", "9.0.17")
                 .HasAnnotation("Relational:MaxIdentifierLength", 128);
 
             SqlServerModelBuilderExtensions.UseIdentityColumns(modelBuilder);
@@ -478,6 +478,12 @@ namespace Syntwin.Infrastructure.Persistence.Migrations
                     b.HasIndex("UserId")
                         .HasDatabaseName("IX_robots_user_id");
 
+                    b.HasIndex("CompanyId", "Status")
+                        .HasDatabaseName("IX_robots_company_status");
+
+                    b.HasIndex("UserId", "Status")
+                        .HasDatabaseName("IX_robots_user_status");
+
                     b.ToTable("robots", (string)null);
                 });
 
@@ -637,6 +643,59 @@ namespace Syntwin.Infrastructure.Persistence.Migrations
                         .HasDatabaseName("UX_robot_program_steps_program_order");
 
                     b.ToTable("robot_program_steps", (string)null);
+                });
+
+            modelBuilder.Entity("Syntwin.Domain.Entities.RobotRuntimeSession", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<DateTimeOffset?>("DetectedOfflineAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<long?>("DurationSeconds")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("EndReason")
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<DateTimeOffset?>("EndedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<DateTimeOffset>("LastSeenAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<Guid>("RobotId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTimeOffset>("StartedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<DateTimeOffset?>("UpdatedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("RobotId")
+                        .IsUnique()
+                        .HasDatabaseName("UX_robot_runtime_sessions_robot_open")
+                        .HasFilter("[EndedAt] IS NULL");
+
+                    b.HasIndex("RobotId", "EndedAt")
+                        .HasDatabaseName("IX_robot_runtime_sessions_robot_ended_at");
+
+                    b.HasIndex("RobotId", "StartedAt")
+                        .HasDatabaseName("IX_robot_runtime_sessions_robot_started_at");
+
+                    b.HasIndex("RobotId", "EndedAt", "EndReason")
+                        .HasDatabaseName("IX_robot_runtime_sessions_robot_ended_at_reason");
+
+                    b.ToTable("robot_runtime_sessions", (string)null);
                 });
 
             modelBuilder.Entity("Syntwin.Domain.Entities.SubscriptionPlan", b =>
@@ -1018,6 +1077,17 @@ namespace Syntwin.Infrastructure.Persistence.Migrations
                     b.Navigation("Program");
                 });
 
+            modelBuilder.Entity("Syntwin.Domain.Entities.RobotRuntimeSession", b =>
+                {
+                    b.HasOne("Syntwin.Domain.Entities.Robot", "Robot")
+                        .WithMany("RuntimeSessions")
+                        .HasForeignKey("RobotId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Robot");
+                });
+
             modelBuilder.Entity("Syntwin.Domain.Entities.UserSubscription", b =>
                 {
                     b.HasOne("Syntwin.Domain.Entities.SubscriptionPlan", "Plan")
@@ -1053,6 +1123,8 @@ namespace Syntwin.Infrastructure.Persistence.Migrations
                     b.Navigation("Commands");
 
                     b.Navigation("Programs");
+
+                    b.Navigation("RuntimeSessions");
                 });
 
             modelBuilder.Entity("Syntwin.Domain.Entities.RobotCommand", b =>

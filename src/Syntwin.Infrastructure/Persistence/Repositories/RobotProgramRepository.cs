@@ -19,12 +19,13 @@ public sealed class RobotProgramRepository : IRobotProgramRepository
         CancellationToken cancellationToken = default)
     {
         return await _dbContext.RobotPrograms
-            .Include(program => program.Steps)
-            .Where(program =>
-                program.RobotId == robotId &&
-                program.Status != RobotProgramStatus.Archived)
-            .OrderByDescending(program => program.UpdatedAt ?? program.CreatedAt)
-            .ToListAsync(cancellationToken);
+    .AsNoTracking()
+    .Include(program => program.Steps)
+    .Where(program =>
+        program.RobotId == robotId &&
+        program.Status != RobotProgramStatus.Archived)
+    .OrderByDescending(program => program.UpdatedAt ?? program.CreatedAt)
+    .ToListAsync(cancellationToken);
     }
 
     public Task<RobotProgram?> GetByIdForRobotAsync(

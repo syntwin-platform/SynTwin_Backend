@@ -22,4 +22,8 @@
     <Folder Include="Telemetry\Services\" />
   </ItemGroup>
 
+	<ItemGroup>
+		<PackageReference Include="Microsoft.Extensions.Options" Version="9.*" />
+	</ItemGroup>
+
 </Project>

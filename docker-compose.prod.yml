@@ -1,0 +1,81 @@
+name: syntwin-prod
+
+services:
+  syntwin-nginx:
+    image: nginx:1.27-alpine
+    ports:
+      - "${BACKEND_PUBLIC_PORT:-8080}:80"
+    volumes:
+      - ./nginx/syntwin.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - syntwin-api
+    networks:
+      - syntwin_network
+    restart: unless-stopped
+
+  syntwin-api:
+    build:
+      context: .
+      dockerfile: src/Syntwin.Api/Dockerfile
+    expose:
+      - "8080"
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ASPNETCORE_URLS: http://+:8080
+      Swagger__Enabled: "true"
+      ConnectionStrings__SyntwinDb: "Server=syntwin-sqlserver,1433;Database=${SQLSERVER_DATABASE};User Id=sa;Password=${SQLSERVER_SA_PASSWORD};TrustServerCertificate=True;Encrypt=True"
+      Redis__ConnectionString: "syntwin-redis:6379"
+      Jwt__Issuer: "Syntwin.Api"
+      Jwt__Audience: "Syntwin.Client"
+      Jwt__SigningKey: "${JWT_SIGNING_KEY}"
+      Jwt__AccessTokenExpirationMinutes: "60"
+      Seed__SuperAdmin__Enabled: "${SEED_SUPER_ADMIN_ENABLED:-false}"
+      Seed__SuperAdmin__Email: "${SEED_SUPER_ADMIN_EMAIL:-admin@syntwin.local}"
+      Seed__SuperAdmin__Password: "${SEED_SUPER_ADMIN_PASSWORD:-}"
+      Seed__SuperAdmin__FullName: "SynTwin Admin"
+      Seed__SuperAdmin__Timezone: "Asia/Ho_Chi_Minh"
+      RobotRuntime__AllowLegacyDeviceSecretAuth: "false"
+      VnPay__ReturnUrl: "${VNPAY_RETURN_URL}"
+      VnPay__IpnUrl: "${VNPAY_IPN_URL}"
+      VnPay__ClientReturnUrl: "${VNPAY_CLIENT_RETURN_URL:-http://localhost:3000/payment/vnpay-return}"
+      VnPay__TmnCode: "${VNPAY_TMN_CODE}"
+      VnPay__HashSecret: "${VNPAY_HASH_SECRET}"
+    depends_on:
+      - syntwin-sqlserver
+      - syntwin-redis
+    networks:
+      - syntwin_network
+    restart: unless-stopped
+
+  syntwin-sqlserver:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_SA_PASSWORD: "${SQLSERVER_SA_PASSWORD}"
+      MSSQL_PID: "Developer"
+    ports:
+      - "${SQLSERVER_PORT:-11433}:1433"
+    volumes:
+      - syntwin_sql_data:/var/opt/mssql
+    networks:
+      - syntwin_network
+    restart: unless-stopped
+
+  syntwin-redis:
+    image: redis:7-alpine
+    ports:
+      - "${REDIS_PORT:-16379}:6379"
+    volumes:
+      - syntwin_redis_data:/data
+    command: ["redis-server", "--appendonly", "yes"]
+    networks:
+      - syntwin_network
+    restart: unless-stopped
+
+volumes:
+  syntwin_sql_data:
+  syntwin_redis_data:
+
+networks:
+  syntwin_network:
+    driver: bridge
