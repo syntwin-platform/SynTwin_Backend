@@ -43,4 +43,10 @@ public interface IRobotProgramService
         Guid programId,
         string? ipAddress,
         CancellationToken cancellationToken = default);
+
+    Task<LuaExportResponse?> ExportLuaAsync(
+    Guid userId,
+    Guid robotId,
+    Guid programId,
+    CancellationToken cancellationToken = default);
 }

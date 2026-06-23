@@ -42,4 +42,9 @@ public interface IRobotService
      Guid userId,
      Guid robotId,
      CancellationToken cancellationToken = default);
+
+    Task<RobotRuntimeConfigResponse?> GetRuntimeConfigAsync(
+    Guid userId,
+    Guid robotId,
+    CancellationToken cancellationToken = default);
 }

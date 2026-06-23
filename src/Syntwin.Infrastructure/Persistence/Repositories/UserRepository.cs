@@ -15,10 +15,11 @@ public sealed class UserRepository : IUserRepository
     }
 
     public Task<bool> EmailExistsAsync(
-        string email,
-        CancellationToken cancellationToken = default)
+    string email,
+    CancellationToken cancellationToken = default)
     {
         return _dbContext.Users
+            .AsNoTracking()
             .AnyAsync(user => user.Email == email, cancellationToken);
     }
 
@@ -45,19 +46,21 @@ public sealed class UserRepository : IUserRepository
     }
 
     public Task<SubscriptionPlan?> GetSubscriptionPlanByCodeAsync(
-        SubscriptionPlanCode code,
-        CancellationToken cancellationToken = default)
+    SubscriptionPlanCode code,
+    CancellationToken cancellationToken = default)
     {
         return _dbContext.SubscriptionPlans
+            .AsNoTracking()
             .FirstOrDefaultAsync(
                 plan => plan.Code == code && plan.IsActive,
                 cancellationToken);
     }
 
     public async Task<IReadOnlyList<SubscriptionPlan>> GetActiveSubscriptionPlansAsync(
-        CancellationToken cancellationToken = default)
+    CancellationToken cancellationToken = default)
     {
         return await _dbContext.SubscriptionPlans
+            .AsNoTracking()
             .Where(plan => plan.IsActive)
             .OrderBy(plan => plan.Id)
             .ToListAsync(cancellationToken);
@@ -164,10 +167,11 @@ public sealed class UserRepository : IUserRepository
     SubscriptionPlanCode? plan)
     {
         var query = _dbContext.Users
-            .Include(user => user.Subscriptions
-                .Where(subscription => subscription.Status == SubscriptionStatus.Active))
-            .ThenInclude(subscription => subscription.Plan)
-            .AsQueryable();
+    .AsNoTracking()
+    .Include(user => user.Subscriptions
+        .Where(subscription => subscription.Status == SubscriptionStatus.Active))
+    .ThenInclude(subscription => subscription.Plan)
+    .AsQueryable();
 
         if (!string.IsNullOrWhiteSpace(search))
         {
@@ -228,15 +232,17 @@ public sealed class UserRepository : IUserRepository
     }
 
     public Task<bool> HasAnotherSuperAdminAsync(
-        Guid userId,
-        CancellationToken cancellationToken = default)
+    Guid userId,
+    CancellationToken cancellationToken = default)
     {
-        return _dbContext.Users.AnyAsync(
-            user =>
-                user.Id != userId &&
-                user.Role == UserRole.SuperAdmin &&
-                user.Status == UserStatus.Active,
-            cancellationToken);
+        return _dbContext.Users
+            .AsNoTracking()
+            .AnyAsync(
+                user =>
+                    user.Id != userId &&
+                    user.Role == UserRole.SuperAdmin &&
+                    user.Status == UserStatus.Active,
+                cancellationToken);
     }
 
     public Task<UserSubscription?> GetPendingPaymentSubscriptionAsync(

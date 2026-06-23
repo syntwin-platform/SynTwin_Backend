@@ -8,6 +8,9 @@ using Syntwin.Domain.Entities;
 using Syntwin.Domain.Enums;
 using Syntwin.Application.RobotPrograms.Interfaces;
 using Syntwin.Application.Companies.Interfaces;
+using Microsoft.Extensions.Options;
+using Syntwin.Application.Robots.Options;
+
 
 namespace Syntwin.Application.Commands.Services;
 
@@ -18,27 +21,40 @@ public sealed class RobotCommandService : IRobotCommandService
     private readonly IRobotRepository _robotRepository;
     private readonly IUserRepository _userRepository;
     private readonly IRobotCommandRepository _commandRepository;
+    private readonly IRobotCommandQueue _commandQueue;
+    private readonly IRobotCommandTimeoutScheduler _commandTimeoutScheduler;
+    private readonly IRobotBusyLock _robotBusyLock;
+    private readonly TimeSpan _robotBusyLockTtl;
     private readonly IAuditLogRepository _auditLogRepository;
     private readonly IRobotProgramRepository _programRepository;
     private readonly IRobotAccessService _robotAccessService;
     private readonly ICompanyRepository _companyRepository;
 
     public RobotCommandService(
-    IRobotRepository robotRepository,
-    IUserRepository userRepository,
-    IRobotCommandRepository commandRepository,
-    IAuditLogRepository auditLogRepository,
-    IRobotProgramRepository programRepository,
-    IRobotAccessService robotAccessService,
-    ICompanyRepository companyRepository)
+IRobotRepository robotRepository,
+IUserRepository userRepository,
+IRobotCommandRepository commandRepository,
+IRobotCommandQueue commandQueue,
+IRobotCommandTimeoutScheduler commandTimeoutScheduler,
+IAuditLogRepository auditLogRepository,
+IRobotProgramRepository programRepository,
+IRobotAccessService robotAccessService,
+ICompanyRepository companyRepository,
+IRobotBusyLock robotBusyLock,
+IOptions<RobotRuntimeOptions> options)
     {
         _robotRepository = robotRepository;
         _userRepository = userRepository;
         _commandRepository = commandRepository;
+        _commandQueue = commandQueue;
+        _commandTimeoutScheduler = commandTimeoutScheduler;
         _auditLogRepository = auditLogRepository;
         _programRepository = programRepository;
         _robotAccessService = robotAccessService;
         _companyRepository = companyRepository;
+        _robotBusyLock = robotBusyLock;
+        _robotBusyLockTtl = TimeSpan.FromSeconds(
+            Math.Max(30, options.Value.RobotBusyLockTtlSeconds));
     }
 
     public async Task<RobotCommandResponse?> CreateAsync(
@@ -119,6 +135,7 @@ public sealed class RobotCommandService : IRobotCommandService
             }, cancellationToken);
 
             await _commandRepository.SaveChangesAsync(cancellationToken);
+
             throw new UnauthorizedAccessException(
                 "Current subscription plan cannot send robot commands.");
         }
@@ -151,25 +168,58 @@ public sealed class RobotCommandService : IRobotCommandService
             TimeoutAt = now.Add(DefaultCommandTimeout)
         };
 
-        await _commandRepository.AddAsync(command, cancellationToken);
-        await _auditLogRepository.AddAsync(new AuditLog
+        var busyLockAcquired = false;
+
+        if (IsBusyLockCommand(command.CommandType))
         {
-            UserId = userId,
-            RobotId = robotId,
-            Action = "COMMAND_REQUESTED",
-            IpAddress = ipAddress,
-            RawPayloadJson = CreateAuditContext(
-    robot.CompanyId,
-    role.Value,
-    command.CommandType.ToString(),
-    command.PayloadJson),
-            Message = $"Command {command.CommandType} was requested.",
-            CreatedAt = DateTimeOffset.UtcNow
-        }, cancellationToken);
+            busyLockAcquired = await _robotBusyLock.TryAcquireAsync(
+                robotId,
+                command.Id,
+                _robotBusyLockTtl,
+                cancellationToken);
 
-        await _commandRepository.SaveChangesAsync(cancellationToken);
+            if (!busyLockAcquired)
+            {
+                throw new InvalidOperationException("Robot already has an active command.");
+            }
+        }
 
-        return ToResponse(command);
+        try
+        {
+            await _commandRepository.AddAsync(command, cancellationToken);
+            await _auditLogRepository.AddAsync(new AuditLog
+            {
+                UserId = userId,
+                RobotId = robotId,
+                Action = "COMMAND_REQUESTED",
+                IpAddress = ipAddress,
+                RawPayloadJson = CreateAuditContext(
+        robot.CompanyId,
+        role.Value,
+        command.CommandType.ToString(),
+        command.PayloadJson),
+                Message = $"Command {command.CommandType} was requested.",
+                CreatedAt = DateTimeOffset.UtcNow
+            }, cancellationToken);
+
+            await _commandRepository.SaveChangesAsync(cancellationToken);
+            await _commandTimeoutScheduler.ScheduleAsync(command, cancellationToken);
+            await _commandQueue.EnqueueAsync(command, cancellationToken);
+
+            return ToResponse(command);
+        }
+        catch
+        {
+            if (busyLockAcquired)
+            {
+                await _robotBusyLock.ReleaseAsync(
+                    robotId,
+                    command.Id,
+                    cancellationToken);
+            }
+
+            throw;
+        }
     }
 
     public async Task<IReadOnlyList<RobotCommandResponse>?> ListAsync(
@@ -496,6 +546,11 @@ public sealed class RobotCommandService : IRobotCommandService
         throw new InvalidOperationException("RunProgram programId must be a valid GUID.");
     }
 
+    private static bool IsBusyLockCommand(RobotCommandType commandType)
+    {
+        return commandType != RobotCommandType.EStop;
+    }
+
     private static RobotCommandResponse ToResponse(RobotCommand command)
     {
         return new RobotCommandResponse
@@ -507,7 +562,20 @@ public sealed class RobotCommandService : IRobotCommandService
                 ? null
                 : JsonSerializer.Deserialize<JsonElement>(command.PayloadJson),
             Status = command.Status.ToString(),
-            CreatedAt = command.CreatedAt
+            CreatedAt = command.CreatedAt,
+            CompletedAt = command.CompletedAt,
+            FailureReason = command.FailureReason,
+            Result = command.Result is null
+                ? null
+                : new RobotCommandResultResponse
+                {
+                    Success = command.Result.Success,
+                    Message = command.Result.Message,
+                    RawPayload = string.IsNullOrWhiteSpace(command.Result.RawPayloadJson)
+                        ? null
+                        : JsonSerializer.Deserialize<JsonElement>(command.Result.RawPayloadJson),
+                    CompletedAt = command.Result.CompletedAt
+                }
         };
     }
 

@@ -23,5 +23,9 @@ public interface IRobotRepository
     RobotStatus status,
     CancellationToken cancellationToken = default);
 
+    Task<IReadOnlyList<Robot>> ListByIdsAsync(
+    IReadOnlyCollection<Guid> robotIds,
+    CancellationToken cancellationToken = default);
+
 
 }

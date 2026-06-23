@@ -20,15 +20,16 @@ public sealed class RobotRepository : IRobotRepository
         CancellationToken cancellationToken = default)
     {
         var query = _dbContext.Robots
-            .Where(robot =>
-                _dbContext.CompanyMembers.Any(member =>
-                    member.CompanyId == robot.CompanyId &&
-                    member.UserId == userId &&
-                    member.IsActive &&
-                    member.Company != null &&
-                    member.Company.Status == CompanyStatus.Active) &&
-                robot.Status != RobotStatus.Disabled)
-            .AsQueryable();
+    .AsNoTracking()
+    .Where(robot =>
+        _dbContext.CompanyMembers.Any(member =>
+            member.CompanyId == robot.CompanyId &&
+            member.UserId == userId &&
+            member.IsActive &&
+            member.Company != null &&
+            member.Company.Status == CompanyStatus.Active) &&
+        robot.Status != RobotStatus.Disabled)
+    .AsQueryable();
 
         if (companyId.HasValue)
         {
@@ -51,17 +52,18 @@ public sealed class RobotRepository : IRobotRepository
         CancellationToken cancellationToken = default)
     {
         return _dbContext.Robots
-            .CountAsync(
-                robot =>
-                    _dbContext.CompanyMembers.Any(member =>
-                        member.CompanyId == robot.CompanyId &&
-                        member.UserId == ownerUserId &&
-                        member.IsActive &&
-                        member.Role == CompanyMemberRole.Owner &&
-                        member.Company != null &&
-                        member.Company.Status == CompanyStatus.Active) &&
-                    robot.Status != RobotStatus.Disabled,
-                cancellationToken);
+    .AsNoTracking()
+    .CountAsync(
+        robot =>
+            _dbContext.CompanyMembers.Any(member =>
+                member.CompanyId == robot.CompanyId &&
+                member.UserId == ownerUserId &&
+                member.IsActive &&
+                member.Role == CompanyMemberRole.Owner &&
+                member.Company != null &&
+                member.Company.Status == CompanyStatus.Active) &&
+            robot.Status != RobotStatus.Disabled,
+        cancellationToken);
     }
 
     public async Task AddAsync(Robot robot, CancellationToken cancellationToken = default)
@@ -74,8 +76,23 @@ public sealed class RobotRepository : IRobotRepository
     CancellationToken cancellationToken = default)
     {
         return await _dbContext.Robots
-            .Where(robot => robot.Status == status)
-            .OrderBy(robot => robot.LastSeenAt)
+    .AsNoTracking()
+    .Where(robot => robot.Status == status)
+    .OrderBy(robot => robot.LastSeenAt)
+    .ToListAsync(cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<Robot>> ListByIdsAsync(
+    IReadOnlyCollection<Guid> robotIds,
+    CancellationToken cancellationToken = default)
+    {
+        if (robotIds.Count == 0)
+        {
+            return Array.Empty<Robot>();
+        }
+
+        return await _dbContext.Robots
+            .Where(robot => robotIds.Contains(robot.Id))
             .ToListAsync(cancellationToken);
     }
 

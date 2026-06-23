@@ -18,6 +18,7 @@ public sealed class SyntwinDbContext : DbContext
     public DbSet<PaymentTransaction> PaymentTransactions => Set<PaymentTransaction>();
     public DbSet<EmailOtp> EmailOtps => Set<EmailOtp>();
     public DbSet<Robot> Robots => Set<Robot>();
+    public DbSet<RobotRuntimeSession> RobotRuntimeSessions => Set<RobotRuntimeSession>();
     public DbSet<RobotCommand> RobotCommands => Set<RobotCommand>();
     public DbSet<CommandResult> CommandResults => Set<CommandResult>();
     public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
@@ -37,6 +38,7 @@ public sealed class SyntwinDbContext : DbContext
         ConfigurePaymentTransactions(modelBuilder);
         ConfigureEmailOtps(modelBuilder);
         ConfigureRobots(modelBuilder);
+        ConfigureRobotRuntimeSessions(modelBuilder);
         ConfigureRobotCommands(modelBuilder);
         ConfigureCommandResults(modelBuilder);
         ConfigureRobotPrograms(modelBuilder);
@@ -543,6 +545,12 @@ public sealed class SyntwinDbContext : DbContext
             entity.HasIndex(robot => robot.Status)
                 .HasDatabaseName("IX_robots_status");
 
+            entity.HasIndex(robot => new { robot.UserId, robot.Status })
+                .HasDatabaseName("IX_robots_user_status");
+
+            entity.HasIndex(robot => new { robot.CompanyId, robot.Status })
+                .HasDatabaseName("IX_robots_company_status");
+
             entity.HasOne(robot => robot.User)
                 .WithMany()
                 .HasForeignKey(robot => robot.UserId)
@@ -553,6 +561,47 @@ public sealed class SyntwinDbContext : DbContext
                 .HasForeignKey(robot => robot.CompanyId)
                 .OnDelete(DeleteBehavior.Restrict);
 
+        });
+    }
+
+    private static void ConfigureRobotRuntimeSessions(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<RobotRuntimeSession>(entity =>
+        {
+            entity.ToTable("robot_runtime_sessions");
+
+            entity.HasKey(session => session.Id);
+
+            entity.Property(session => session.StartedAt)
+                .IsRequired();
+
+            entity.Property(session => session.LastSeenAt)
+                .IsRequired();
+
+            entity.Property(session => session.EndReason)
+                .HasMaxLength(50);
+
+            entity.Property(session => session.CreatedAt)
+                .IsRequired();
+
+            entity.HasIndex(session => new { session.RobotId, session.StartedAt })
+                .HasDatabaseName("IX_robot_runtime_sessions_robot_started_at");
+
+            entity.HasIndex(session => new { session.RobotId, session.EndedAt })
+                .HasDatabaseName("IX_robot_runtime_sessions_robot_ended_at");
+
+            entity.HasIndex(session => new { session.RobotId, session.EndedAt, session.EndReason })
+                .HasDatabaseName("IX_robot_runtime_sessions_robot_ended_at_reason");
+
+            entity.HasIndex(session => session.RobotId)
+                .IsUnique()
+                .HasFilter("[EndedAt] IS NULL")
+                .HasDatabaseName("UX_robot_runtime_sessions_robot_open");
+
+            entity.HasOne(session => session.Robot)
+                .WithMany(robot => robot.RuntimeSessions)
+                .HasForeignKey(session => session.RobotId)
+                .OnDelete(DeleteBehavior.Restrict);
         });
     }
 

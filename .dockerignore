@@ -1,6 +1,12 @@
-bin/
-obj/
-.vs/
+**/bin/
+**/obj/
+**/.vs/
+**/.vscode/
+**/.idea/
 .git/
+.agents/
+.codex/
+.env
 *.user
 *.suo
+*.zip

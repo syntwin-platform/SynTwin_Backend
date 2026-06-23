@@ -149,9 +149,19 @@ public sealed class RobotService : IRobotService
             companyId,
             cancellationToken);
 
-        return robots
-            .Where(robot => roles.ContainsKey(robot.CompanyId))
-            .Select(robot => ToResponse(robot, roles[robot.CompanyId]))
+        var accessibleRobots = robots
+     .Where(robot => roles.ContainsKey(robot.CompanyId))
+     .ToList();
+
+        var runtimeStates = await _robotStateCache.GetRuntimeStatesAsync(
+            accessibleRobots.Select(robot => robot.Id).ToArray(),
+            cancellationToken);
+
+        return accessibleRobots
+            .Select(robot => ToRuntimeResponse(
+                robot,
+                roles[robot.CompanyId],
+                runtimeStates))
             .ToList();
     }
 
@@ -172,7 +182,9 @@ public sealed class RobotService : IRobotService
             robot.CompanyId,
             cancellationToken);
 
-        return role.HasValue ? ToResponse(robot, role.Value) : null;
+        return role.HasValue
+    ? await ToRuntimeResponseAsync(robot, role.Value, cancellationToken)
+    : null;
     }
     public async Task<RobotLatestStateResponse?> GetLatestStateAsync(
     Guid userId,
@@ -221,6 +233,31 @@ public sealed class RobotService : IRobotService
             LastSeenAt = redisLastSeenAt ?? robot.LastSeenAt,
             Source = "SqlFallback"
         };
+    }
+
+    public async Task<RobotRuntimeConfigResponse?> GetRuntimeConfigAsync(
+    Guid userId,
+    Guid robotId,
+    CancellationToken cancellationToken = default)
+    {
+        var robot = await _robotRepository.GetByIdAsync(robotId, cancellationToken);
+
+        if (robot is null)
+        {
+            return null;
+        }
+
+        var role = await _robotAccessService.GetCompanyRoleAsync(
+            userId,
+            robot.CompanyId,
+            cancellationToken);
+
+        if (!role.HasValue)
+        {
+            return null;
+        }
+
+        return CreateDefaultRuntimeConfig(robot);
     }
     public async Task<RobotResponse?> UpdateAsync(
         Guid userId,
@@ -312,6 +349,22 @@ public sealed class RobotService : IRobotService
 
         await _robotRepository.SaveChangesAsync(cancellationToken);
 
+        await _robotStateCache.ClearDeviceSessionAsync(
+            robot.Id,
+            cancellationToken);
+
+        await _robotStateCache.ClearCurrentRuntimeSessionAsync(
+            robot.Id,
+            cancellationToken);
+
+        await _robotStateCache.RemovePresenceDueAsync(
+            robot.Id,
+            cancellationToken);
+
+        await _robotStateCache.RemoveLastSeenDirtyAsync(
+            robot.Id,
+            cancellationToken);
+
         return true;
     }
 
@@ -358,6 +411,10 @@ public sealed class RobotService : IRobotService
 
         await _robotRepository.SaveChangesAsync(cancellationToken);
 
+        await _robotStateCache.ClearDeviceSessionAsync(
+            robot.Id,
+            cancellationToken);
+
         return new ResetRobotDeviceSecretResponse
         {
             RobotId = robot.Id,
@@ -388,6 +445,41 @@ public sealed class RobotService : IRobotService
         });
     }
 
+    private static RobotRuntimeConfigResponse CreateDefaultRuntimeConfig(Robot robot)
+    {
+        return new RobotRuntimeConfigResponse
+        {
+            RobotId = robot.Id,
+            RobotModel = string.IsNullOrWhiteSpace(robot.Model)
+                ? "Fairino FR5"
+                : robot.Model,
+            Profile = "Simulator",
+            MotionPolicy = new RobotMotionPolicyResponse
+            {
+                MoveL = new MoveLPolicyResponse
+                {
+                    MaxDistanceMm = 300,
+                    MaxRotationDeg = 45,
+                    WaypointSpacingMm = 5,
+                    TimeoutMs = 20_000
+                },
+                MoveJ = new MoveJPolicyResponse
+                {
+                    TimeoutMs = 20_000,
+                    MaxJointDeltaDeg = 180
+                }
+            },
+            JointLimits =
+            [
+                new JointLimitResponse { Joint = 1, MinDeg = -175, MaxDeg = 175 },
+            new JointLimitResponse { Joint = 2, MinDeg = -265, MaxDeg = 85 },
+            new JointLimitResponse { Joint = 3, MinDeg = -160, MaxDeg = 160 },
+            new JointLimitResponse { Joint = 4, MinDeg = -265, MaxDeg = 265 },
+            new JointLimitResponse { Joint = 5, MinDeg = -175, MaxDeg = 175 },
+            new JointLimitResponse { Joint = 6, MinDeg = -175, MaxDeg = 175 }
+            ]
+        };
+    }
     private static RobotResponse ToResponse(Robot robot, CompanyMemberRole role)
     {
         return new RobotResponse
@@ -406,6 +498,77 @@ public sealed class RobotService : IRobotService
             CreatedAt = robot.CreatedAt,
             UpdatedAt = robot.UpdatedAt
         };
+    }
+
+    private static RobotResponse ToRuntimeResponse(
+    Robot robot,
+    CompanyMemberRole role,
+    IReadOnlyDictionary<Guid, RobotRuntimeStateCacheEntry> runtimeStates)
+    {
+        var response = ToResponse(robot, role);
+
+        if (robot.Status == RobotStatus.Disabled)
+        {
+            return response;
+        }
+
+        runtimeStates.TryGetValue(robot.Id, out var runtimeState);
+
+        response.Status = ResolveRuntimeStatus(
+            robot.Status,
+            runtimeState?.IsOnline == true);
+
+        response.LastSeenAt = runtimeState?.LastSeenAt ?? response.LastSeenAt;
+
+        return response;
+    }
+
+    private async Task<RobotResponse> ToRuntimeResponseAsync(
+    Robot robot,
+    CompanyMemberRole role,
+    CancellationToken cancellationToken)
+    {
+        var response = ToResponse(robot, role);
+
+        if (robot.Status == RobotStatus.Disabled)
+        {
+            return response;
+        }
+
+        var isOnline = await _robotStateCache.IsOnlineAsync(
+            robot.Id,
+            cancellationToken);
+
+        var redisLastSeenAt = await _robotStateCache.GetLastSeenAsync(
+            robot.Id,
+            cancellationToken);
+
+        response.Status = ResolveRuntimeStatus(
+            robot.Status,
+            isOnline);
+
+        response.LastSeenAt = redisLastSeenAt ?? response.LastSeenAt;
+
+        return response;
+    }
+
+    private static string ResolveRuntimeStatus(
+    RobotStatus persistedStatus,
+    bool isOnline)
+    {
+        if (persistedStatus == RobotStatus.Disabled)
+        {
+            return RobotStatus.Disabled.ToString();
+        }
+
+        if (isOnline)
+        {
+            return RobotStatus.Online.ToString();
+        }
+
+        return persistedStatus == RobotStatus.Online
+            ? RobotStatus.Offline.ToString()
+            : persistedStatus.ToString();
     }
 
     private static string ResolveLatestStatus(

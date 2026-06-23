@@ -62,6 +62,37 @@ public sealed class RobotProgramsController : ControllerBase
             : Ok(program);
     }
 
+    [HttpGet("{programId:guid}/export/lua")]
+    [ProducesResponseType(typeof(LuaExportResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<LuaExportResponse>> ExportLua(
+    Guid robotId,
+    Guid programId,
+    CancellationToken cancellationToken)
+    {
+        var userId = GetCurrentUserId();
+        if (userId is null) return Unauthorized(new { message = "Invalid access token." });
+
+        try
+        {
+            var export = await _programService.ExportLuaAsync(
+                userId.Value,
+                robotId,
+                programId,
+                cancellationToken);
+
+            return export is null
+                ? NotFound(new { message = "Robot program not found." })
+                : Ok(export);
+        }
+        catch (InvalidOperationException exception)
+        {
+            return BadRequest(new { message = exception.Message });
+        }
+    }
+
     [HttpPost]
     [ProducesResponseType(typeof(RobotProgramResponse), StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]

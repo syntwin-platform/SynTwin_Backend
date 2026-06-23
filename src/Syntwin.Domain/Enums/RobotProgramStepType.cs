@@ -1,6 +1,4 @@
-﻿namespace Syntwin.Domain.Enums;
-
-public enum RobotProgramStepType
+﻿public enum RobotProgramStepType
 {
     MoveJ = 1,
     MoveL = 2,
@@ -10,5 +8,7 @@ public enum RobotProgramStepType
     WaitMs = 6,
     GripperOpen = 7,
     GripperClose = 8,
-    Comment = 9
+    Comment = 9,
+    CustomCommand = 10,
+    SetAO = 11
 }

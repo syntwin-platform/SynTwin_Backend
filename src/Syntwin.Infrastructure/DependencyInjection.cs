@@ -31,7 +31,9 @@ using Syntwin.Application.Companies.Interfaces;
 using Syntwin.Application.Companies.Services;
 using Syntwin.Application.AdminCompanies.Interfaces;
 using Syntwin.Application.AdminCompanies.Services;
-
+using Syntwin.Application.LuaParsing.Interfaces;
+using Syntwin.Application.LuaParsing.Services;
+using Syntwin.Application.Robots.Options;
 
 namespace Syntwin.Infrastructure;
 
@@ -84,9 +86,11 @@ public static class DependencyInjection
         {
             throw new InvalidOperationException("Redis connection string is required.");
         }
-
         services.AddSingleton<IConnectionMultiplexer>(
-            _ => ConnectionMultiplexer.Connect(redisConnectionString));
+    _ => ConnectionMultiplexer.Connect(redisConnectionString));
+
+        services.AddSingleton<IDistributedLock, RedisDistributedLock>();
+        services.AddSingleton<IRobotRuntimeMetrics, RobotRuntimeMetrics>();
 
         services.AddScoped<IRobotStateCache, RedisRobotStateCache>();
         services.AddScoped<IPasswordHasher, BCryptPasswordHasher>();
@@ -99,10 +103,14 @@ public static class DependencyInjection
         services.AddScoped<IVnPayGateway, VnPayGateway>();
         services.AddScoped<IPaymentService, PaymentService>();
         services.AddScoped<IRobotRepository, RobotRepository>();
+        services.AddScoped<IRobotRuntimeSessionRepository, RobotRuntimeSessionRepository>();
         services.AddScoped<IRobotAccessService, RobotAccessService>();
         services.AddScoped<IRobotService, RobotService>();
         services.AddScoped<IAuditLogRepository, AuditLogRepository>();
         services.AddScoped<IRobotCommandRepository, RobotCommandRepository>();
+        services.AddScoped<IRobotCommandQueue, RedisRobotCommandQueue>();
+        services.AddScoped<IRobotBusyLock, RedisRobotBusyLock>();
+        services.AddScoped<IRobotCommandTimeoutScheduler, RedisRobotCommandTimeoutScheduler>();
         services.AddScoped<IRobotCommandService, RobotCommandService>();
         services.AddScoped<IDeviceGatewayService, DeviceGatewayService>();
         services.AddScoped<IRobotProgramRepository, RobotProgramRepository>();
@@ -110,6 +118,9 @@ public static class DependencyInjection
         services.AddScoped<ICompanyRepository, CompanyRepository>();
         services.AddScoped<ICompanyService, CompanyService>();
         services.AddScoped<IAdminCompanyService, AdminCompanyService>();
+        services.AddScoped<ILuaProgramParser, LuaProgramParser>();
+        services.AddScoped<ILuaProgramImportMapper, LuaProgramImportMapper>();
+        services.AddScoped<ILuaProgramImportService, LuaProgramImportService>();
         services.Configure<EmailOptions>(options =>
         {
             var emailSection = configuration.GetSection("Email");
