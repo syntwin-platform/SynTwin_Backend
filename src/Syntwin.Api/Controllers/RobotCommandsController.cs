@@ -3,6 +3,8 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Syntwin.Application.Commands.Dtos;
 using Syntwin.Application.Commands.Interfaces;
+using Syntwin.Application.RobotSafety.Dtos;
+using Syntwin.Application.RobotSafety.Exceptions;
 
 namespace Syntwin.Api.Controllers;
 
@@ -20,7 +22,7 @@ public sealed class RobotCommandsController : ControllerBase
 
     [HttpPost]
     [ProducesResponseType(typeof(RobotCommandResponse), StatusCodes.Status201Created)]
-    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(SafetyValidationErrorResponse), StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -48,6 +50,14 @@ public sealed class RobotCommandsController : ControllerBase
         catch (UnauthorizedAccessException exception)
         {
             return StatusCode(StatusCodes.Status403Forbidden, new { message = exception.Message });
+        }
+        catch (RobotSafetyValidationException exception)
+        {
+            return BadRequest(new SafetyValidationErrorResponse
+            {
+                Message = exception.Message,
+                Diagnostics = exception.Result.Diagnostics
+            });
         }
         catch (InvalidOperationException exception)
         {

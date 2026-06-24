@@ -42,4 +42,6 @@ public sealed class Robot
 
     public ICollection<RobotProgram> Programs { get; set; } = new List<RobotProgram>();
     public ICollection<RobotRuntimeSession> RuntimeSessions { get; set; } = new List<RobotRuntimeSession>();
+
+    public ICollection<RobotSafetyPolicy> SafetyPolicies { get; set; } = new List<RobotSafetyPolicy>();
 }

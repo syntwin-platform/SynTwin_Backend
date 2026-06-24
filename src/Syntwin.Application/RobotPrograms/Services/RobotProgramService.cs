@@ -8,6 +8,9 @@ using Syntwin.Domain.Entities;
 using Syntwin.Domain.Enums;
 using System.Globalization;
 using System.Text.Json;
+using Syntwin.Application.RobotSafety.Dtos;
+using Syntwin.Application.RobotSafety.Interfaces;
+using Syntwin.Application.RobotSafety.Exceptions;
 
 namespace Syntwin.Application.RobotPrograms.Services;
 
@@ -18,19 +21,22 @@ public sealed class RobotProgramService : IRobotProgramService
     private readonly IRobotRealtimeNotifier _realtimeNotifier;
     private readonly IRobotAccessService _robotAccessService;
     private readonly IAuditLogRepository _auditLogRepository;
+    private readonly IRobotSafetyValidationService _safetyValidationService;
 
     public RobotProgramService(
-    IRobotRepository robotRepository,
-    IRobotProgramRepository programRepository,
-    IRobotRealtimeNotifier realtimeNotifier,
-    IRobotAccessService robotAccessService,
-    IAuditLogRepository auditLogRepository)
+        IRobotRepository robotRepository,
+        IRobotProgramRepository programRepository,
+        IRobotRealtimeNotifier realtimeNotifier,
+        IRobotAccessService robotAccessService,
+        IAuditLogRepository auditLogRepository,
+        IRobotSafetyValidationService safetyValidationService)
     {
         _robotRepository = robotRepository;
         _programRepository = programRepository;
         _realtimeNotifier = realtimeNotifier;
         _robotAccessService = robotAccessService;
         _auditLogRepository = auditLogRepository;
+        _safetyValidationService = safetyValidationService;
     }
 
     public async Task<IReadOnlyList<RobotProgramResponse>?> ListAsync(
@@ -289,6 +295,27 @@ cancellationToken);
             throw new InvalidOperationException("Program must have at least one step before publishing.");
         }
         EnsureProgramCanBePublished(program);
+
+        var safetyResult = await _safetyValidationService.ValidateProgramAsync(
+            CreateSafetyValidationRequest(robot, program),
+            cancellationToken);
+
+        if (safetyResult.HasBlockers)
+        {
+            await AddProgramSafetyBlockedAuditAsync(
+                userId,
+                robot.CompanyId,
+                role.Value,
+                program,
+                safetyResult,
+                ipAddress,
+                cancellationToken);
+
+            await _programRepository.SaveChangesAsync(cancellationToken);
+
+            throw new RobotSafetyValidationException(safetyResult);
+        }
+
         program.Status = RobotProgramStatus.Published;
         program.UpdatedAt = DateTimeOffset.UtcNow;
         await AddProgramAuditAsync(
@@ -345,19 +372,23 @@ cancellationToken);
 
         program.Status = RobotProgramStatus.Archived;
         program.UpdatedAt = DateTimeOffset.UtcNow;
+
         await AddProgramAuditAsync(
-    userId,
-    robot.CompanyId,
-    role.Value,
-    program,
-    "PROGRAM_ARCHIVED",
-    "Archived",
-    ipAddress,
-    cancellationToken);
+            userId,
+            robot.CompanyId,
+            role.Value,
+            program,
+            "PROGRAM_ARCHIVED",
+            "Archived",
+            ipAddress,
+            cancellationToken);
+
         await _programRepository.SaveChangesAsync(cancellationToken);
+
         await _realtimeNotifier.NotifyProgramUpdatedAsync(
-    ToProgramUpdatedEvent(program, "Archived"),
-    cancellationToken);
+            ToProgramUpdatedEvent(program, "Archived"),
+            cancellationToken);
+
         return true;
     }
 
@@ -1135,6 +1166,61 @@ cancellationToken);
         CancellationToken cancellationToken)
     {
         return (await GetRoleAsync(userId, companyId, cancellationToken)).HasValue;
+    }
+
+    private static RobotSafetyValidationRequest CreateSafetyValidationRequest(
+        Robot robot,
+        RobotProgram program)
+    {
+        return new RobotSafetyValidationRequest
+        {
+            RobotId = robot.Id,
+            CompanyId = robot.CompanyId,
+            RobotModel = robot.Model,
+            CurrentJointAngles = null,
+            Steps = program.Steps
+                .OrderBy(step => step.OrderIndex)
+                .Select(step => new RobotProgramStepSafetyInput
+                {
+                    OrderIndex = step.OrderIndex,
+                    StepType = step.StepType.ToString(),
+                    Label = step.Label,
+                    Payload = string.IsNullOrWhiteSpace(step.PayloadJson)
+                        ? JsonSerializer.Deserialize<JsonElement>("{}")
+                        : JsonSerializer.Deserialize<JsonElement>(step.PayloadJson)
+                })
+                .ToList()
+        };
+    }
+
+    private async Task AddProgramSafetyBlockedAuditAsync(
+        Guid userId,
+        Guid companyId,
+        CompanyMemberRole actorCompanyRole,
+        RobotProgram program,
+        SafetyValidationResult safetyResult,
+        string? ipAddress,
+        CancellationToken cancellationToken)
+    {
+        var payload = JsonSerializer.Serialize(new
+        {
+            companyId,
+            actorCompanyRole = actorCompanyRole.ToString(),
+            programId = program.Id,
+            programName = program.Name,
+            diagnostics = safetyResult.Diagnostics
+        });
+
+        await _auditLogRepository.AddAsync(new AuditLog
+        {
+            UserId = userId,
+            RobotId = program.RobotId,
+            Action = "PROGRAM_PUBLISH_BLOCKED_SAFETY",
+            IpAddress = NormalizeNullable(ipAddress),
+            Message = $"Program '{program.Name}' was blocked by safety validation.",
+            RawPayloadJson = payload,
+            CreatedAt = DateTimeOffset.UtcNow
+        }, cancellationToken);
     }
 
     private Task<CompanyMemberRole?> GetRoleAsync(

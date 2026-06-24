@@ -15,14 +15,19 @@ using System.Text.Json;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Syntwin.Api.HealthChecks;
-
+using System.Text.Json.Serialization;
 
 const string CorsPolicyName = "SyntwinCors";
 var builder = WebApplication.CreateBuilder(args);
 
 // Add services to the container.
 
-builder.Services.AddControllers();
+builder.Services
+    .AddControllers()
+    .AddJsonOptions(options =>
+    {
+        options.JsonSerializerOptions.Converters.Add(new JsonStringEnumConverter());
+    });
 var redisConnectionString = builder.Configuration["Redis:ConnectionString"];
 
 if (string.IsNullOrWhiteSpace(redisConnectionString))

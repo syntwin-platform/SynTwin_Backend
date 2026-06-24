@@ -3,7 +3,8 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Syntwin.Application.RobotPrograms.Dtos;
 using Syntwin.Application.RobotPrograms.Interfaces;
-
+using Syntwin.Application.RobotSafety.Exceptions;
+using Syntwin.Application.RobotSafety.Dtos;
 namespace Syntwin.Api.Controllers;
 
 [ApiController]
@@ -68,9 +69,9 @@ public sealed class RobotProgramsController : ControllerBase
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<LuaExportResponse>> ExportLua(
-    Guid robotId,
-    Guid programId,
-    CancellationToken cancellationToken)
+        Guid robotId,
+        Guid programId,
+        CancellationToken cancellationToken)
     {
         var userId = GetCurrentUserId();
         if (userId is null) return Unauthorized(new { message = "Invalid access token." });
@@ -109,11 +110,11 @@ public sealed class RobotProgramsController : ControllerBase
         try
         {
             var program = await _programService.CreateAsync(
-     userId.Value,
-     robotId,
-     request,
-     GetClientIpAddress(),
-     cancellationToken);
+                userId.Value,
+                robotId,
+                request,
+                GetClientIpAddress(),
+                cancellationToken);
 
             return program is null
                 ? NotFound(new { message = "Robot not found." })
@@ -149,12 +150,13 @@ public sealed class RobotProgramsController : ControllerBase
         try
         {
             var program = await _programService.UpdateAsync(
-        userId.Value,
-        robotId,
-        programId,
-        request,
-        GetClientIpAddress(),
-        cancellationToken);
+                userId.Value,
+                robotId,
+                programId,
+                request,
+                GetClientIpAddress(),
+                cancellationToken);
+
             return program is null
                 ? NotFound(new { message = "Robot program not found." })
                 : Ok(program);
@@ -171,7 +173,7 @@ public sealed class RobotProgramsController : ControllerBase
 
     [HttpPost("{programId:guid}/publish")]
     [ProducesResponseType(typeof(RobotProgramResponse), StatusCodes.Status200OK)]
-    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(SafetyValidationErrorResponse), StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<RobotProgramResponse>> Publish(
@@ -185,14 +187,22 @@ public sealed class RobotProgramsController : ControllerBase
         try
         {
             var program = await _programService.PublishAsync(
-     userId.Value,
-     robotId,
-     programId,
-     GetClientIpAddress(),
-     cancellationToken);
+                userId.Value,
+                robotId,
+                programId,
+                GetClientIpAddress(),
+                cancellationToken);
             return program is null
                 ? NotFound(new { message = "Robot program not found." })
                 : Ok(program);
+        }
+        catch (RobotSafetyValidationException exception)
+        {
+            return BadRequest(new SafetyValidationErrorResponse
+            {
+                Message = exception.Message,
+                Diagnostics = exception.Result.Diagnostics
+            });
         }
         catch (InvalidOperationException exception)
         {
@@ -219,11 +229,11 @@ public sealed class RobotProgramsController : ControllerBase
         try
         {
             var archived = await _programService.ArchiveAsync(
-        userId.Value,
-        robotId,
-        programId,
-        GetClientIpAddress(),
-        cancellationToken);
+                userId.Value,
+                robotId,
+                programId,
+                GetClientIpAddress(),
+                cancellationToken);
 
             return archived
                 ? NoContent()
@@ -239,6 +249,7 @@ public sealed class RobotProgramsController : ControllerBase
     {
         return HttpContext.Connection.RemoteIpAddress?.ToString();
     }
+
     private Guid? GetCurrentUserId()
     {
         var value = User.FindFirstValue(ClaimTypes.NameIdentifier);

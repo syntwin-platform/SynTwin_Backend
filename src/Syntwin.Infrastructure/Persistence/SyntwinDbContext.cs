@@ -20,6 +20,7 @@ public sealed class SyntwinDbContext : DbContext
     public DbSet<Robot> Robots => Set<Robot>();
     public DbSet<RobotRuntimeSession> RobotRuntimeSessions => Set<RobotRuntimeSession>();
     public DbSet<RobotCommand> RobotCommands => Set<RobotCommand>();
+    public DbSet<RobotSafetyPolicy> RobotSafetyPolicies => Set<RobotSafetyPolicy>();
     public DbSet<CommandResult> CommandResults => Set<CommandResult>();
     public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
     public DbSet<RobotProgram> RobotPrograms => Set<RobotProgram>();
@@ -38,6 +39,7 @@ public sealed class SyntwinDbContext : DbContext
         ConfigurePaymentTransactions(modelBuilder);
         ConfigureEmailOtps(modelBuilder);
         ConfigureRobots(modelBuilder);
+        ConfigureRobotSafetyPolicies(modelBuilder);
         ConfigureRobotRuntimeSessions(modelBuilder);
         ConfigureRobotCommands(modelBuilder);
         ConfigureCommandResults(modelBuilder);
@@ -561,6 +563,82 @@ public sealed class SyntwinDbContext : DbContext
                 .HasForeignKey(robot => robot.CompanyId)
                 .OnDelete(DeleteBehavior.Restrict);
 
+        });
+    }
+
+    private static void ConfigureRobotSafetyPolicies(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<RobotSafetyPolicy>(entity =>
+        {
+            entity.ToTable("robot_safety_policies");
+
+            entity.HasKey(policy => policy.Id);
+
+            entity.Property(policy => policy.Scope)
+                .HasConversion<string>()
+                .IsRequired()
+                .HasMaxLength(30);
+
+            entity.Property(policy => policy.Name)
+                .IsRequired()
+                .HasMaxLength(150);
+
+            entity.Property(policy => policy.RobotModel)
+                .IsRequired()
+                .HasMaxLength(80);
+
+            entity.Property(policy => policy.PolicyJson)
+                .IsRequired()
+                .HasColumnType("nvarchar(max)");
+
+            entity.Property(policy => policy.IsActive)
+                .IsRequired()
+                .HasDefaultValue(true);
+
+            entity.Property(policy => policy.CreatedAt)
+                .IsRequired();
+
+            entity.HasIndex(policy => policy.CompanyId)
+                .HasDatabaseName("IX_robot_safety_policies_company_id");
+
+            entity.HasIndex(policy => policy.RobotId)
+                .HasDatabaseName("IX_robot_safety_policies_robot_id");
+
+            entity.HasIndex(policy => new { policy.CompanyId, policy.Scope, policy.IsActive })
+                .HasDatabaseName("IX_robot_safety_policies_company_scope_active");
+
+            entity.HasIndex(policy => new { policy.RobotId, policy.Scope, policy.IsActive })
+                .HasDatabaseName("IX_robot_safety_policies_robot_scope_active");
+
+            entity.HasIndex(policy => new { policy.CompanyId, policy.Scope })
+                .IsUnique()
+                .HasFilter("[RobotId] IS NULL AND [IsActive] = 1")
+                .HasDatabaseName("UX_robot_safety_policies_company_active");
+
+            entity.HasIndex(policy => new { policy.RobotId, policy.Scope })
+                .IsUnique()
+                .HasFilter("[RobotId] IS NOT NULL AND [IsActive] = 1")
+                .HasDatabaseName("UX_robot_safety_policies_robot_active");
+
+            entity.HasOne(policy => policy.Company)
+                .WithMany(company => company.SafetyPolicies)
+                .HasForeignKey(policy => policy.CompanyId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(policy => policy.Robot)
+                .WithMany(robot => robot.SafetyPolicies)
+                .HasForeignKey(policy => policy.RobotId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(policy => policy.CreatedByUser)
+                .WithMany()
+                .HasForeignKey(policy => policy.CreatedByUserId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(policy => policy.UpdatedByUser)
+                .WithMany()
+                .HasForeignKey(policy => policy.UpdatedByUserId)
+                .OnDelete(DeleteBehavior.Restrict);
         });
     }
 
