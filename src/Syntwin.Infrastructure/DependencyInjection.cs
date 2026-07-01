@@ -29,6 +29,8 @@ using Syntwin.Application.RobotSafety.Interfaces;
 using Syntwin.Application.RobotSafety.Services;
 using Syntwin.Application.SubscriptionPlans.Interfaces;
 using Syntwin.Application.SubscriptionPlans.Services;
+using Syntwin.Application.Telemetry.Interfaces;
+using Syntwin.Application.Telemetry.Services;
 using Syntwin.Application.Users.Interfaces;
 using Syntwin.Application.Users.Services;
 using Syntwin.Infrastructure.Auth;
@@ -36,6 +38,7 @@ using Syntwin.Infrastructure.Email;
 using Syntwin.Infrastructure.Payments.VnPay;
 using Syntwin.Infrastructure.Persistence;
 using Syntwin.Infrastructure.Robots;
+using Syntwin.Infrastructure.Telemetry;
 
 namespace Syntwin.Infrastructure;
 
@@ -81,7 +84,7 @@ public static class DependencyInjection
                 configuration.GetConnectionString("SyntwinDb"));
         });
         services.Configure<RobotRuntimeOptions>(configuration.GetSection("RobotRuntime"));
-
+        services.Configure<InfluxDbOptions>(configuration.GetSection("InfluxDb"));
         var redisConnectionString = configuration["Redis:ConnectionString"];
 
         if (string.IsNullOrWhiteSpace(redisConnectionString))
@@ -94,6 +97,16 @@ public static class DependencyInjection
         services.AddSingleton<IDistributedLock, RedisDistributedLock>();
         services.AddSingleton<IRobotRuntimeMetrics, RobotRuntimeMetrics>();
 
+        if (configuration.GetValue<bool>("InfluxDb:Enabled"))
+        {
+            services.AddSingleton<IRobotTelemetryHistoryWriter, InfluxRobotTelemetryHistoryWriter>();
+            services.AddSingleton<IRobotTelemetryHistoryReader, InfluxRobotTelemetryHistoryReader>();
+        }
+        else
+        {
+            services.AddSingleton<IRobotTelemetryHistoryWriter, NoopRobotTelemetryHistoryWriter>();
+            services.AddSingleton<IRobotTelemetryHistoryReader, NoopRobotTelemetryHistoryReader>();
+        }
         services.AddScoped<IRobotStateCache, RedisRobotStateCache>();
         services.AddScoped<IPasswordHasher, BCryptPasswordHasher>();
         services.AddScoped<IJwtTokenGenerator, JwtTokenGenerator>();
@@ -122,6 +135,7 @@ public static class DependencyInjection
         services.AddScoped<IAdminCompanyService, AdminCompanyService>();
         services.AddScoped<ILuaProgramParser, LuaProgramParser>();
         services.AddScoped<ILuaProgramImportMapper, LuaProgramImportMapper>();
+        services.AddScoped<ILuaProgramImportService, LuaProgramImportService>();
         services.AddScoped<IRobotSafetyPolicyService, RobotSafetyPolicyService>();
         services.AddScoped<IRobotSafetyPolicyRepository, RobotSafetyPolicyRepository>();
         services.AddScoped<IRobotSafetyDefaultPolicyFactory, RobotSafetyDefaultPolicyFactory>();

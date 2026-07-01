@@ -9,6 +9,8 @@ using Syntwin.Application.Realtime.Interfaces;
 using Syntwin.Application.Robots.Dtos;
 using Syntwin.Application.Robots.Interfaces;
 using Syntwin.Application.Robots.Options;
+using Syntwin.Application.Telemetry.Dtos;
+using Syntwin.Application.Telemetry.Interfaces;
 using Syntwin.Domain.Entities;
 using Syntwin.Domain.Enums;
 using System.Security.Cryptography;
@@ -35,19 +37,21 @@ public sealed class DeviceGatewayService : IDeviceGatewayService
     private readonly int _pendingCommandMaxWaitSeconds;
     private readonly int _pendingCommandMaxSkippedQueueItems;
     private readonly IRobotRuntimeMetrics _metrics;
+    private readonly IRobotTelemetryHistoryWriter _telemetryHistoryWriter;
     public DeviceGatewayService(
        IRobotRepository robotRepository,
-IRobotRuntimeSessionRepository runtimeSessionRepository,
-IRobotCommandRepository commandRepository,
-IRobotCommandQueue commandQueue,
-IRobotCommandTimeoutScheduler commandTimeoutScheduler,
-IRobotBusyLock robotBusyLock,
-IAuditLogRepository auditLogRepository,
-IPasswordHasher passwordHasher,
-IRobotStateCache robotStateCache,
-IRobotRealtimeNotifier realtimeNotifier,
-IOptions<RobotRuntimeOptions> options,
-IRobotRuntimeMetrics metrics)
+    IRobotRuntimeSessionRepository runtimeSessionRepository,
+    IRobotCommandRepository commandRepository,
+    IRobotCommandQueue commandQueue,
+    IRobotCommandTimeoutScheduler commandTimeoutScheduler,
+    IRobotBusyLock robotBusyLock,
+    IAuditLogRepository auditLogRepository,
+    IPasswordHasher passwordHasher,
+    IRobotStateCache robotStateCache,
+    IRobotRealtimeNotifier realtimeNotifier,
+    IOptions<RobotRuntimeOptions> options,
+    IRobotRuntimeMetrics metrics,
+    IRobotTelemetryHistoryWriter telemetryHistoryWriter)
     {
         _robotRepository = robotRepository;
         _runtimeSessionRepository = runtimeSessionRepository;
@@ -60,6 +64,7 @@ IRobotRuntimeMetrics metrics)
         _robotStateCache = robotStateCache;
         _realtimeNotifier = realtimeNotifier;
         _metrics = metrics;
+        _telemetryHistoryWriter = telemetryHistoryWriter;
         var runtimeSessionTtlSeconds = Math.Max(
     60,
     options.Value.RuntimeSessionTtlSeconds);
@@ -317,6 +322,25 @@ IRobotRuntimeMetrics metrics)
         };
 
         await _robotStateCache.SetLatestAsync(latestState, cancellationToken);
+        await WriteTelemetryHistorySafeAsync(
+    new RobotTelemetryHistoryWriteRequest
+    {
+        RobotId = auth.Id,
+        CompanyId = auth.CompanyId,
+        RuntimeSessionId = await _robotStateCache.GetCurrentRuntimeSessionIdAsync(
+            auth.Id,
+            cancellationToken),
+        Model = auth.Model,
+        Source = "DeviceLegacySecret",
+        Status = latestState.Status,
+        TcpPose = latestState.TcpPose,
+        JointAngles = latestState.JointAngles,
+        Temperature = latestState.Temperature,
+        CollisionWarning = latestState.CollisionWarning,
+        Timestamp = timestamp,
+        ReceivedAt = now
+    },
+    cancellationToken);
 
         var hasTelemetryViewers = await _robotStateCache.HasTelemetryViewersAsync(
     auth.Id,
@@ -397,6 +421,24 @@ CancellationToken cancellationToken)
         };
 
         await _robotStateCache.SetLatestAsync(latestState, cancellationToken);
+        await WriteTelemetryHistorySafeAsync(
+            new RobotTelemetryHistoryWriteRequest
+            {
+                RobotId = robotId,
+                RuntimeSessionId = await _robotStateCache.GetCurrentRuntimeSessionIdAsync(
+                    robotId,
+                    cancellationToken),
+                Source = "DeviceSession",
+                Status = latestState.Status,
+                TcpPose = latestState.TcpPose,
+                JointAngles = latestState.JointAngles,
+                Temperature = latestState.Temperature,
+                CollisionWarning = latestState.CollisionWarning,
+                Timestamp = timestamp,
+                ReceivedAt = now
+            },
+            cancellationToken);
+
 
         var hasTelemetryViewers = await _robotStateCache.HasTelemetryViewersAsync(
     robotId,
@@ -503,6 +545,19 @@ CancellationToken cancellationToken)
     isBusy,
     waitSeconds,
     cancellationToken);
+    }
+    private async Task WriteTelemetryHistorySafeAsync(
+        RobotTelemetryHistoryWriteRequest request,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            await _telemetryHistoryWriter.WriteAsync(request, cancellationToken);
+        }
+        catch
+        {
+            // Telemetry history must never break latest-state or realtime flow.
+        }
     }
 
     private async Task<DevicePendingCommandResult> TakePendingCommandAuthenticatedAsync(

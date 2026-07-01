@@ -124,7 +124,8 @@ builder.Services.AddInfrastructure(builder.Configuration);
 builder.Services
     .AddHealthChecks()
     .AddCheck<SyntwinDbHealthCheck>("sqlserver")
-    .AddCheck<RedisHealthCheck>("redis");
+    .AddCheck<RedisHealthCheck>("redis")
+    .AddCheck<InfluxDbHealthCheck>("influxdb");
 var jwtSection = builder.Configuration.GetSection("Jwt");
 var signingKey = jwtSection["SigningKey"] ?? string.Empty;
 
