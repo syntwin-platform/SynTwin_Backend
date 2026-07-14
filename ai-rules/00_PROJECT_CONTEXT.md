@@ -31,7 +31,7 @@ Backend chỉ quản lý:
 Source zip hiện tại có:
 
 - Solution/project structure theo 4 project: `Syntwin.Api`, `Syntwin.Application`, `Syntwin.Domain`, `Syntwin.Infrastructure`.
-- `docker-compose.yml` đã có SQL Server container.
+- `docker-compose.prod.yml` là cấu hình Docker Compose chính và đã có SQL Server container.
 - `appsettings.json` đã có connection string SQL Server local.
 - Package JWT, Swagger, EF Core SQL Server, BCrypt đã xuất hiện trong csproj.
 - Các project Application/Domain/Infrastructure vẫn gần như skeleton, còn `Class1.cs`.
