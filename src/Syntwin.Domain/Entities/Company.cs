@@ -31,4 +31,6 @@ public sealed class Company
     public ICollection<CompanyMember> Members { get; set; } = new List<CompanyMember>();
 
     public ICollection<Robot> Robots { get; set; } = new List<Robot>();
+
+    public ICollection<RobotSafetyPolicy> SafetyPolicies { get; set; } = new List<RobotSafetyPolicy>();
 }

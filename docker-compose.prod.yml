@@ -25,6 +25,13 @@ services:
       Swagger__Enabled: "true"
       ConnectionStrings__SyntwinDb: "Server=syntwin-sqlserver,1433;Database=${SQLSERVER_DATABASE};User Id=sa;Password=${SQLSERVER_SA_PASSWORD};TrustServerCertificate=True;Encrypt=True"
       Redis__ConnectionString: "syntwin-redis:6379"
+      InfluxDb__Enabled: "true"
+      InfluxDb__Url: "http://syntwin-influxdb:8086"
+      InfluxDb__Org: "${INFLUXDB_ORG:-syntwin}"
+      InfluxDb__Bucket: "${INFLUXDB_BUCKET:-robot-telemetry}"
+      InfluxDb__Token: "${INFLUXDB_TOKEN:-syntwin-local-dev-token}"
+      InfluxDb__WriteTimeoutSeconds: "5"
+      InfluxDb__QueryTimeoutSeconds: "10"
       Jwt__Issuer: "Syntwin.Api"
       Jwt__Audience: "Syntwin.Client"
       Jwt__SigningKey: "${JWT_SIGNING_KEY}"
@@ -43,6 +50,7 @@ services:
     depends_on:
       - syntwin-sqlserver
       - syntwin-redis
+      - syntwin-influxdb
     networks:
       - syntwin_network
     restart: unless-stopped
@@ -71,10 +79,29 @@ services:
     networks:
       - syntwin_network
     restart: unless-stopped
+  syntwin-influxdb:
+    image: influxdb:2.7-alpine
+    environment:
+      DOCKER_INFLUXDB_INIT_MODE: setup
+      DOCKER_INFLUXDB_INIT_USERNAME: "${INFLUXDB_USERNAME:-syntwin}"
+      DOCKER_INFLUXDB_INIT_PASSWORD: "${INFLUXDB_PASSWORD:-syntwin-local-password}"
+      DOCKER_INFLUXDB_INIT_ORG: "${INFLUXDB_ORG:-syntwin}"
+      DOCKER_INFLUXDB_INIT_BUCKET: "${INFLUXDB_BUCKET:-robot-telemetry}"
+      DOCKER_INFLUXDB_INIT_ADMIN_TOKEN: "${INFLUXDB_TOKEN:-syntwin-local-dev-token}"
+    ports:
+      - "${INFLUXDB_PORT:-18086}:8086"
+    volumes:
+      - syntwin_influxdb_data:/var/lib/influxdb2
+      - syntwin_influxdb_config:/etc/influxdb2
+    networks:
+      - syntwin_network
+    restart: unless-stopped
 
 volumes:
   syntwin_sql_data:
   syntwin_redis_data:
+  syntwin_influxdb_data:
+  syntwin_influxdb_config:
 
 networks:
   syntwin_network:

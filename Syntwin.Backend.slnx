@@ -5,4 +5,7 @@
     <Project Path="src/Syntwin.Domain/Syntwin.Domain.csproj" />
     <Project Path="src/Syntwin.Infrastructure/Syntwin.Infrastructure.csproj" />
   </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Syntwin.Application.Tests/Syntwin.Application.Tests.csproj" />
+  </Folder>
 </Solution>

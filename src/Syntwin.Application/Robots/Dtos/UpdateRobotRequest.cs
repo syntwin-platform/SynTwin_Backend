@@ -4,6 +4,8 @@ namespace Syntwin.Application.Robots.Dtos;
 
 public sealed class UpdateRobotRequest
 {
+    public Guid? RobotModelId { get; set; }
+
     [Required]
     [MaxLength(100)]
     public string RobotName { get; set; } = string.Empty;
@@ -20,4 +22,6 @@ public sealed class UpdateRobotRequest
 
     [Range(1, 65535)]
     public int? Port { get; set; }
+
+    public RobotSceneBindingRequest? SceneBinding { get; set; }
 }

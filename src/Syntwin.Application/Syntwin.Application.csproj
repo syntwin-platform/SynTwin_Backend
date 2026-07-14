@@ -17,9 +17,6 @@
     <Folder Include="Auth\Services\" />
     <Folder Include="Common\Results\" />
     <Folder Include="Common\Security\" />
-    <Folder Include="Telemetry\Dtos\" />
-    <Folder Include="Telemetry\Interfaces\" />
-    <Folder Include="Telemetry\Services\" />
   </ItemGroup>
 
 	<ItemGroup>

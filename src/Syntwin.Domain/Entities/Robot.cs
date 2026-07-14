@@ -14,6 +14,7 @@ public sealed class Robot
 
     public string Model { get; set; } = string.Empty;
 
+    public Guid? RobotModelId { get; set; }
     public string ConnectionType { get; set; } = "HTTP";
 
     public RobotStatus Status { get; set; } = RobotStatus.Registered;
@@ -34,6 +35,10 @@ public sealed class Robot
 
     public Company? Company { get; set; }
 
+    public RobotModel? RobotModel { get; set; }
+
+    public RobotSceneBinding? SceneBinding { get; set; }
+
     public ICollection<RobotCommand> Commands { get; set; } = new List<RobotCommand>();
 
     public ICollection<CommandResult> CommandResults { get; set; } = new List<CommandResult>();
@@ -42,4 +47,6 @@ public sealed class Robot
 
     public ICollection<RobotProgram> Programs { get; set; } = new List<RobotProgram>();
     public ICollection<RobotRuntimeSession> RuntimeSessions { get; set; } = new List<RobotRuntimeSession>();
+
+    public ICollection<RobotSafetyPolicy> SafetyPolicies { get; set; } = new List<RobotSafetyPolicy>();
 }

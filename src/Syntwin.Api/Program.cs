@@ -15,14 +15,19 @@ using System.Text.Json;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Syntwin.Api.HealthChecks;
-
+using System.Text.Json.Serialization;
 
 const string CorsPolicyName = "SyntwinCors";
 var builder = WebApplication.CreateBuilder(args);
 
 // Add services to the container.
 
-builder.Services.AddControllers();
+builder.Services
+    .AddControllers()
+    .AddJsonOptions(options =>
+    {
+        options.JsonSerializerOptions.Converters.Add(new JsonStringEnumConverter());
+    });
 var redisConnectionString = builder.Configuration["Redis:ConnectionString"];
 
 if (string.IsNullOrWhiteSpace(redisConnectionString))
@@ -40,6 +45,7 @@ builder.Services
 builder.Services.AddScoped<IRobotRealtimeNotifier, SignalRRobotRealtimeNotifier>();
 builder.Services.AddHostedService<RobotOfflineMonitorService>();
 builder.Services.AddHostedService<RobotCommandTimeoutMonitorService>();
+builder.Services.AddHostedService<FactoryRunLockMaintenanceService>();
 builder.Services.AddHostedService<RobotLastSeenFlushService>();
 
 var allowedOrigins = builder.Configuration
@@ -119,7 +125,8 @@ builder.Services.AddInfrastructure(builder.Configuration);
 builder.Services
     .AddHealthChecks()
     .AddCheck<SyntwinDbHealthCheck>("sqlserver")
-    .AddCheck<RedisHealthCheck>("redis");
+    .AddCheck<RedisHealthCheck>("redis")
+    .AddCheck<InfluxDbHealthCheck>("influxdb");
 var jwtSection = builder.Configuration.GetSection("Jwt");
 var signingKey = jwtSection["SigningKey"] ?? string.Empty;
 

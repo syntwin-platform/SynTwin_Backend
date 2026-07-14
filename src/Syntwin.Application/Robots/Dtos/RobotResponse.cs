@@ -8,6 +8,8 @@ public sealed class RobotResponse
 
     public Guid CompanyId { get; set; }
 
+    public Guid? RobotModelId { get; set; }
+
     public string CurrentUserRole { get; set; } = string.Empty;
 
     public string RobotName { get; set; } = string.Empty;
@@ -27,4 +29,6 @@ public sealed class RobotResponse
     public DateTimeOffset CreatedAt { get; set; }
 
     public DateTimeOffset? UpdatedAt { get; set; }
+
+    public RobotSceneBindingResponse? SceneBinding { get; set; }
 }

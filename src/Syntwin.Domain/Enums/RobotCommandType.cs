@@ -10,5 +10,6 @@ public enum RobotCommandType
     MoveJ = 6,
     MoveL = 7,
     SetDO = 8,
-    RunProgram = 9
+    RunProgram = 9,
+    PrepareProgram = 10
 }

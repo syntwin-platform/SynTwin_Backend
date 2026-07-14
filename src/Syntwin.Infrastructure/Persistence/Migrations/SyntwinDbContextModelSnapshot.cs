@@ -264,6 +264,205 @@ namespace Syntwin.Infrastructure.Persistence.Migrations
                     b.ToTable("email_otps", (string)null);
                 });
 
+            modelBuilder.Entity("Syntwin.Domain.Entities.FactoryRun", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int?>("ActualStartSkewMs")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset?>("CancelledAtUtc")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<Guid>("CompanyId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTimeOffset?>("CompletedAtUtc")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("CoordinationMode")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)")
+                        .HasDefaultValue("Synchronized");
+
+                    b.Property<DateTimeOffset>("CreatedAtUtc")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<Guid>("CreatedByUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("FailurePolicy")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)")
+                        .HasDefaultValue("IsolateTarget");
+
+                    b.Property<string>("FailureReason")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<string>("LuaContent")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("LuaContentHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<string>("LuaFileName")
+                        .IsRequired()
+                        .HasMaxLength(260)
+                        .HasColumnType("nvarchar(260)");
+
+                    b.Property<DateTimeOffset?>("PreparedAtUtc")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("ProgramName")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<DateTimeOffset?>("ScheduledStartAtUtc")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<DateTimeOffset?>("StartedAtUtc")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<string>("StepDurationsJson")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<int>("TargetCount")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset?>("UpdatedAtUtc")
+                        .HasColumnType("datetimeoffset");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CompanyId")
+                        .HasDatabaseName("IX_factory_runs_company_id");
+
+                    b.HasIndex("CreatedByUserId")
+                        .HasDatabaseName("IX_factory_runs_created_by_user_id");
+
+                    b.HasIndex("CompanyId", "Status", "CreatedAtUtc")
+                        .HasDatabaseName("IX_factory_runs_company_status_created_at");
+
+                    b.ToTable("factory_runs", (string)null);
+                });
+
+            modelBuilder.Entity("Syntwin.Domain.Entities.FactoryRunTarget", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTimeOffset?>("ActualStartedAtUtc")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<DateTimeOffset?>("ArmedAtUtc")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<Guid?>("CommandId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTimeOffset?>("CommandReceivedAtUtc")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<DateTimeOffset?>("CompletedAtUtc")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<DateTimeOffset>("CreatedAtUtc")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("EstimatedStepDurationsJson")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid>("FactoryRunId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("FailureReason")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<Guid?>("PrepareCommandId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTimeOffset?>("PrepareStartedAtUtc")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<DateTimeOffset?>("PreparedAtUtc")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<Guid?>("ProgramId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("ReadinessError")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<DateTimeOffset?>("ReadyAtUtc")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<Guid>("RobotId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("RuntimeSessionId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int?>("StartLateByMs")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset?>("StartedAtUtc")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<string>("TerminationReason")
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<DateTimeOffset?>("UpdatedAtUtc")
+                        .HasColumnType("datetimeoffset");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CommandId")
+                        .HasDatabaseName("IX_factory_run_targets_command_id");
+
+                    b.HasIndex("FactoryRunId")
+                        .HasDatabaseName("IX_factory_run_targets_factory_run_id");
+
+                    b.HasIndex("PrepareCommandId")
+                        .HasDatabaseName("IX_factory_run_targets_prepare_command_id");
+
+                    b.HasIndex("ProgramId")
+                        .HasDatabaseName("IX_factory_run_targets_program_id");
+
+                    b.HasIndex("RobotId")
+                        .HasDatabaseName("IX_factory_run_targets_robot_id");
+
+                    b.HasIndex("FactoryRunId", "RobotId")
+                        .IsUnique()
+                        .HasDatabaseName("UX_factory_run_targets_run_robot");
+
+                    b.ToTable("factory_run_targets", (string)null);
+                });
+
             modelBuilder.Entity("Syntwin.Domain.Entities.PaymentTransaction", b =>
                 {
                     b.Property<Guid>("Id")
@@ -449,6 +648,9 @@ namespace Syntwin.Infrastructure.Persistence.Migrations
                     b.Property<int?>("Port")
                         .HasColumnType("int");
 
+                    b.Property<Guid?>("RobotModelId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<string>("RobotName")
                         .IsRequired()
                         .HasMaxLength(100)
@@ -471,6 +673,9 @@ namespace Syntwin.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("CompanyId")
                         .HasDatabaseName("IX_robots_company_id");
+
+                    b.HasIndex("RobotModelId")
+                        .HasDatabaseName("IX_robots_robot_model_id");
 
                     b.HasIndex("Status")
                         .HasDatabaseName("IX_robots_status");
@@ -551,6 +756,93 @@ namespace Syntwin.Infrastructure.Persistence.Migrations
                         .HasDatabaseName("IX_robot_commands_robot_status_created_at");
 
                     b.ToTable("robot_commands", (string)null);
+                });
+
+            modelBuilder.Entity("Syntwin.Domain.Entities.RobotModel", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("DefaultTcpFrame")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<string>("Description")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<string>("DisplayName")
+                        .IsRequired()
+                        .HasMaxLength(150)
+                        .HasColumnType("nvarchar(150)");
+
+                    b.Property<int>("Dof")
+                        .HasColumnType("int");
+
+                    b.Property<bool>("IsActive")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(true);
+
+                    b.Property<string>("JointLimitsJson")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("JointNamesJson")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("MeshRootPath")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<string>("ModelCode")
+                        .IsRequired()
+                        .HasMaxLength(80)
+                        .HasColumnType("nvarchar(80)");
+
+                    b.Property<DateTimeOffset?>("UpdatedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("UrdfPath")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<string>("Vendor")
+                        .IsRequired()
+                        .HasMaxLength(80)
+                        .HasColumnType("nvarchar(80)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("IsActive")
+                        .HasDatabaseName("IX_robot_models_is_active");
+
+                    b.HasIndex("Vendor", "ModelCode")
+                        .IsUnique()
+                        .HasDatabaseName("UX_robot_models_vendor_model_code");
+
+                    b.ToTable("robot_models", (string)null);
+
+                    b.HasData(
+                        new
+                        {
+                            Id = new Guid("8f1e8d7a-5b7a-4a0f-8b2e-4e5d9f0f0005"),
+                            CreatedAt = new DateTimeOffset(new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0)),
+                            DefaultTcpFrame = "tool_link",
+                            Description = "Fairino FR5 6-DOF collaborative robot model for simulator onboarding.",
+                            DisplayName = "Fairino FR5",
+                            Dof = 6,
+                            IsActive = true,
+                            JointLimitsJson = "[{\"joint\":1,\"minDeg\":-175,\"maxDeg\":175},{\"joint\":2,\"minDeg\":-265,\"maxDeg\":85},{\"joint\":3,\"minDeg\":-160,\"maxDeg\":160},{\"joint\":4,\"minDeg\":-265,\"maxDeg\":265},{\"joint\":5,\"minDeg\":-175,\"maxDeg\":175},{\"joint\":6,\"minDeg\":-175,\"maxDeg\":175}]",
+                            JointNamesJson = "[\"j1\",\"j2\",\"j3\",\"j4\",\"j5\",\"j6\"]",
+                            MeshRootPath = "/fairino_description/meshes/fairino5_v6",
+                            ModelCode = "FR5",
+                            UrdfPath = "/fairino_description/urdf/fairino5_v6.urdf",
+                            Vendor = "Fairino"
+                        });
                 });
 
             modelBuilder.Entity("Syntwin.Domain.Entities.RobotProgram", b =>
@@ -696,6 +988,147 @@ namespace Syntwin.Infrastructure.Persistence.Migrations
                         .HasDatabaseName("IX_robot_runtime_sessions_robot_ended_at_reason");
 
                     b.ToTable("robot_runtime_sessions", (string)null);
+                });
+
+            modelBuilder.Entity("Syntwin.Domain.Entities.RobotSafetyPolicy", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("CompanyId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<Guid>("CreatedByUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<bool>("IsActive")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(true);
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(150)
+                        .HasColumnType("nvarchar(150)");
+
+                    b.Property<string>("PolicyJson")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("RobotId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("RobotModel")
+                        .IsRequired()
+                        .HasMaxLength(80)
+                        .HasColumnType("nvarchar(80)");
+
+                    b.Property<string>("Scope")
+                        .IsRequired()
+                        .HasMaxLength(30)
+                        .HasColumnType("nvarchar(30)");
+
+                    b.Property<DateTimeOffset?>("UpdatedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<Guid?>("UpdatedByUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CompanyId")
+                        .HasDatabaseName("IX_robot_safety_policies_company_id");
+
+                    b.HasIndex("CreatedByUserId");
+
+                    b.HasIndex("RobotId")
+                        .HasDatabaseName("IX_robot_safety_policies_robot_id");
+
+                    b.HasIndex("UpdatedByUserId");
+
+                    b.HasIndex("CompanyId", "Scope")
+                        .IsUnique()
+                        .HasDatabaseName("UX_robot_safety_policies_company_active")
+                        .HasFilter("[RobotId] IS NULL AND [IsActive] = 1");
+
+                    b.HasIndex("RobotId", "Scope")
+                        .IsUnique()
+                        .HasDatabaseName("UX_robot_safety_policies_robot_active")
+                        .HasFilter("[RobotId] IS NOT NULL AND [IsActive] = 1");
+
+                    b.HasIndex("CompanyId", "Scope", "IsActive")
+                        .HasDatabaseName("IX_robot_safety_policies_company_scope_active");
+
+                    b.HasIndex("RobotId", "Scope", "IsActive")
+                        .HasDatabaseName("IX_robot_safety_policies_robot_scope_active");
+
+                    b.ToTable("robot_safety_policies", (string)null);
+                });
+
+            modelBuilder.Entity("Syntwin.Domain.Entities.RobotSceneBinding", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<double>("BaseX")
+                        .HasColumnType("float");
+
+                    b.Property<double>("BaseY")
+                        .HasColumnType("float");
+
+                    b.Property<double>("BaseYaw")
+                        .HasColumnType("float");
+
+                    b.Property<double>("BaseZ")
+                        .HasColumnType("float");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("GraphPath")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<string>("PrimPath")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<Guid>("RobotId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("RosNamespace")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<string>("SceneType")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)")
+                        .HasDefaultValue("FairinoStudio");
+
+                    b.Property<DateTimeOffset?>("UpdatedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("UrdfPath")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("RobotId")
+                        .IsUnique()
+                        .HasDatabaseName("UX_robot_scene_bindings_robot_id");
+
+                    b.HasIndex("SceneType", "RobotId")
+                        .HasDatabaseName("IX_robot_scene_bindings_scene_robot");
+
+                    b.ToTable("robot_scene_bindings", (string)null);
                 });
 
             modelBuilder.Entity("Syntwin.Domain.Entities.SubscriptionPlan", b =>
@@ -980,6 +1413,65 @@ namespace Syntwin.Infrastructure.Persistence.Migrations
                     b.Navigation("User");
                 });
 
+            modelBuilder.Entity("Syntwin.Domain.Entities.FactoryRun", b =>
+                {
+                    b.HasOne("Syntwin.Domain.Entities.Company", "Company")
+                        .WithMany()
+                        .HasForeignKey("CompanyId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Syntwin.Domain.Entities.User", "CreatedByUser")
+                        .WithMany()
+                        .HasForeignKey("CreatedByUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Company");
+
+                    b.Navigation("CreatedByUser");
+                });
+
+            modelBuilder.Entity("Syntwin.Domain.Entities.FactoryRunTarget", b =>
+                {
+                    b.HasOne("Syntwin.Domain.Entities.RobotCommand", "Command")
+                        .WithMany()
+                        .HasForeignKey("CommandId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("Syntwin.Domain.Entities.FactoryRun", "FactoryRun")
+                        .WithMany("Targets")
+                        .HasForeignKey("FactoryRunId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Syntwin.Domain.Entities.RobotCommand", "PrepareCommand")
+                        .WithMany()
+                        .HasForeignKey("PrepareCommandId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("Syntwin.Domain.Entities.RobotProgram", "Program")
+                        .WithMany()
+                        .HasForeignKey("ProgramId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("Syntwin.Domain.Entities.Robot", "Robot")
+                        .WithMany()
+                        .HasForeignKey("RobotId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Command");
+
+                    b.Navigation("FactoryRun");
+
+                    b.Navigation("PrepareCommand");
+
+                    b.Navigation("Program");
+
+                    b.Navigation("Robot");
+                });
+
             modelBuilder.Entity("Syntwin.Domain.Entities.PaymentTransaction", b =>
                 {
                     b.HasOne("Syntwin.Domain.Entities.UserSubscription", "Subscription")
@@ -1017,6 +1509,11 @@ namespace Syntwin.Infrastructure.Persistence.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
+                    b.HasOne("Syntwin.Domain.Entities.RobotModel", "RobotModel")
+                        .WithMany("Robots")
+                        .HasForeignKey("RobotModelId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
                     b.HasOne("Syntwin.Domain.Entities.User", "User")
                         .WithMany()
                         .HasForeignKey("UserId")
@@ -1024,6 +1521,8 @@ namespace Syntwin.Infrastructure.Persistence.Migrations
                         .IsRequired();
 
                     b.Navigation("Company");
+
+                    b.Navigation("RobotModel");
 
                     b.Navigation("User");
                 });
@@ -1088,6 +1587,50 @@ namespace Syntwin.Infrastructure.Persistence.Migrations
                     b.Navigation("Robot");
                 });
 
+            modelBuilder.Entity("Syntwin.Domain.Entities.RobotSafetyPolicy", b =>
+                {
+                    b.HasOne("Syntwin.Domain.Entities.Company", "Company")
+                        .WithMany("SafetyPolicies")
+                        .HasForeignKey("CompanyId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Syntwin.Domain.Entities.User", "CreatedByUser")
+                        .WithMany()
+                        .HasForeignKey("CreatedByUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Syntwin.Domain.Entities.Robot", "Robot")
+                        .WithMany("SafetyPolicies")
+                        .HasForeignKey("RobotId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("Syntwin.Domain.Entities.User", "UpdatedByUser")
+                        .WithMany()
+                        .HasForeignKey("UpdatedByUserId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.Navigation("Company");
+
+                    b.Navigation("CreatedByUser");
+
+                    b.Navigation("Robot");
+
+                    b.Navigation("UpdatedByUser");
+                });
+
+            modelBuilder.Entity("Syntwin.Domain.Entities.RobotSceneBinding", b =>
+                {
+                    b.HasOne("Syntwin.Domain.Entities.Robot", "Robot")
+                        .WithOne("SceneBinding")
+                        .HasForeignKey("Syntwin.Domain.Entities.RobotSceneBinding", "RobotId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Robot");
+                });
+
             modelBuilder.Entity("Syntwin.Domain.Entities.UserSubscription", b =>
                 {
                     b.HasOne("Syntwin.Domain.Entities.SubscriptionPlan", "Plan")
@@ -1112,6 +1655,13 @@ namespace Syntwin.Infrastructure.Persistence.Migrations
                     b.Navigation("Members");
 
                     b.Navigation("Robots");
+
+                    b.Navigation("SafetyPolicies");
+                });
+
+            modelBuilder.Entity("Syntwin.Domain.Entities.FactoryRun", b =>
+                {
+                    b.Navigation("Targets");
                 });
 
             modelBuilder.Entity("Syntwin.Domain.Entities.Robot", b =>
@@ -1125,11 +1675,20 @@ namespace Syntwin.Infrastructure.Persistence.Migrations
                     b.Navigation("Programs");
 
                     b.Navigation("RuntimeSessions");
+
+                    b.Navigation("SafetyPolicies");
+
+                    b.Navigation("SceneBinding");
                 });
 
             modelBuilder.Entity("Syntwin.Domain.Entities.RobotCommand", b =>
                 {
                     b.Navigation("Result");
+                });
+
+            modelBuilder.Entity("Syntwin.Domain.Entities.RobotModel", b =>
+                {
+                    b.Navigation("Robots");
                 });
 
             modelBuilder.Entity("Syntwin.Domain.Entities.RobotProgram", b =>

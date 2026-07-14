@@ -10,7 +10,9 @@ using Syntwin.Application.RobotPrograms.Interfaces;
 using Syntwin.Application.Companies.Interfaces;
 using Microsoft.Extensions.Options;
 using Syntwin.Application.Robots.Options;
-
+using Syntwin.Application.RobotSafety.Dtos;
+using Syntwin.Application.RobotSafety.Interfaces;
+using Syntwin.Application.RobotSafety.Exceptions;
 
 namespace Syntwin.Application.Commands.Services;
 
@@ -29,19 +31,21 @@ public sealed class RobotCommandService : IRobotCommandService
     private readonly IRobotProgramRepository _programRepository;
     private readonly IRobotAccessService _robotAccessService;
     private readonly ICompanyRepository _companyRepository;
+    private readonly IRobotSafetyValidationService _safetyValidationService;
 
     public RobotCommandService(
-IRobotRepository robotRepository,
-IUserRepository userRepository,
-IRobotCommandRepository commandRepository,
-IRobotCommandQueue commandQueue,
-IRobotCommandTimeoutScheduler commandTimeoutScheduler,
-IAuditLogRepository auditLogRepository,
-IRobotProgramRepository programRepository,
-IRobotAccessService robotAccessService,
-ICompanyRepository companyRepository,
-IRobotBusyLock robotBusyLock,
-IOptions<RobotRuntimeOptions> options)
+        IRobotRepository robotRepository,
+        IUserRepository userRepository,
+        IRobotCommandRepository commandRepository,
+        IRobotCommandQueue commandQueue,
+        IRobotCommandTimeoutScheduler commandTimeoutScheduler,
+        IAuditLogRepository auditLogRepository,
+        IRobotProgramRepository programRepository,
+        IRobotAccessService robotAccessService,
+        ICompanyRepository companyRepository,
+        IRobotBusyLock robotBusyLock,
+        IOptions<RobotRuntimeOptions> options,
+        IRobotSafetyValidationService safetyValidationService)
     {
         _robotRepository = robotRepository;
         _userRepository = userRepository;
@@ -55,6 +59,7 @@ IOptions<RobotRuntimeOptions> options)
         _robotBusyLock = robotBusyLock;
         _robotBusyLockTtl = TimeSpan.FromSeconds(
             Math.Max(30, options.Value.RobotBusyLockTtlSeconds));
+        _safetyValidationService = safetyValidationService;
     }
 
     public async Task<RobotCommandResponse?> CreateAsync(
@@ -89,8 +94,7 @@ IOptions<RobotRuntimeOptions> options)
 
         if (robot.Status == RobotStatus.Disabled)
         {
-            throw new InvalidOperationException(
-                "Disabled robot cannot receive commands.");
+            throw new InvalidOperationException("Disabled robot cannot receive commands.");
         }
 
         var company = await _companyRepository.GetByIdAsync(
@@ -148,11 +152,14 @@ IOptions<RobotRuntimeOptions> options)
         ValidateCommandPayload(commandType, request.Payload);
 
         var payloadJson = commandType == RobotCommandType.RunProgram
-             ? await BuildRunProgramSnapshotPayloadAsync(
-         robotId,
-         request.Payload,
-         cancellationToken)
-     : request.Payload?.GetRawText();
+            ? await BuildRunProgramSnapshotPayloadAsync(
+                userId,
+                robot,
+                role.Value,
+                request.Payload,
+                ipAddress,
+                cancellationToken)
+            : request.Payload?.GetRawText();
 
         var now = DateTimeOffset.UtcNow;
 
@@ -472,14 +479,17 @@ IOptions<RobotRuntimeOptions> options)
     }
 
     private async Task<string> BuildRunProgramSnapshotPayloadAsync(
-    Guid robotId,
-    JsonElement? payload,
-    CancellationToken cancellationToken)
+        Guid userId,
+        Robot robot,
+        CompanyMemberRole actorCompanyRole,
+        JsonElement? payload,
+        string? ipAddress,
+        CancellationToken cancellationToken)
     {
         var programId = ReadProgramId(payload);
 
         var program = await _programRepository.GetByIdForRobotAsync(
-            robotId,
+            robot.Id,
             programId,
             cancellationToken);
 
@@ -496,6 +506,26 @@ IOptions<RobotRuntimeOptions> options)
         if (program.Steps.Count == 0)
         {
             throw new InvalidOperationException("Robot program must have at least one step.");
+        }
+
+        var safetyResult = await _safetyValidationService.ValidateProgramAsync(
+            CreateSafetyValidationRequest(robot, program),
+            cancellationToken);
+
+        if (safetyResult.HasBlockers)
+        {
+            await AddCommandSafetyBlockedAuditAsync(
+                userId,
+                robot.CompanyId,
+                actorCompanyRole,
+                program,
+                safetyResult,
+                ipAddress,
+                cancellationToken);
+
+            await _commandRepository.SaveChangesAsync(cancellationToken);
+
+            throw new RobotSafetyValidationException(safetyResult);
         }
 
         var snapshot = new
@@ -522,7 +552,60 @@ IOptions<RobotRuntimeOptions> options)
         return JsonSerializer.Serialize(snapshot);
     }
 
+    private static RobotSafetyValidationRequest CreateSafetyValidationRequest(
+        Robot robot,
+        RobotProgram program)
+    {
+        return new RobotSafetyValidationRequest
+        {
+            RobotId = robot.Id,
+            CompanyId = robot.CompanyId,
+            RobotModel = robot.Model,
+            CurrentJointAngles = null,
+            Steps = program.Steps
+                .OrderBy(step => step.OrderIndex)
+                .Select(step => new RobotProgramStepSafetyInput
+                {
+                    OrderIndex = step.OrderIndex,
+                    StepType = step.StepType.ToString(),
+                    Label = step.Label,
+                    Payload = string.IsNullOrWhiteSpace(step.PayloadJson)
+                        ? JsonSerializer.Deserialize<JsonElement>("{}")
+                        : JsonSerializer.Deserialize<JsonElement>(step.PayloadJson)
+                })
+                .ToList()
+        };
+    }
 
+    private async Task AddCommandSafetyBlockedAuditAsync(
+        Guid userId,
+        Guid companyId,
+        CompanyMemberRole actorCompanyRole,
+        RobotProgram program,
+        SafetyValidationResult safetyResult,
+        string? ipAddress,
+        CancellationToken cancellationToken)
+    {
+        var payload = JsonSerializer.Serialize(new
+        {
+            companyId,
+            actorCompanyRole = actorCompanyRole.ToString(),
+            programId = program.Id,
+            programName = program.Name,
+            diagnostics = safetyResult.Diagnostics
+        });
+
+        await _auditLogRepository.AddAsync(new AuditLog
+        {
+            UserId = userId,
+            RobotId = program.RobotId,
+            Action = "COMMAND_BLOCKED_SAFETY",
+            IpAddress = ipAddress,
+            Message = $"RunProgram for program '{program.Name}' was blocked by safety validation.",
+            RawPayloadJson = payload,
+            CreatedAt = DateTimeOffset.UtcNow
+        }, cancellationToken);
+    }
 
     private static Guid ReadProgramId(JsonElement? payload)
     {
@@ -548,8 +631,10 @@ IOptions<RobotRuntimeOptions> options)
 
     private static bool IsBusyLockCommand(RobotCommandType commandType)
     {
-        return commandType != RobotCommandType.EStop;
+        return commandType is not RobotCommandType.EStop
+            and not RobotCommandType.PrepareProgram;
     }
+
 
     private static RobotCommandResponse ToResponse(RobotCommand command)
     {

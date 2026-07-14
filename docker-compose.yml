@@ -33,7 +33,7 @@ services:
       - syntwin_sql_data:/var/opt/mssql
     networks:
       - syntwin_network
-      
+
   syntwin-redis:
     image: redis:7-alpine
     container_name: syntwin-redis

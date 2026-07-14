@@ -8,6 +8,10 @@ public interface IRobotCommandQueue
         RobotCommand command,
         CancellationToken cancellationToken = default);
 
+    Task EnqueueManyAsync(
+        IReadOnlyCollection<RobotCommand> commands,
+        CancellationToken cancellationToken = default);
+
     Task RequeueAsync(
         RobotCommand command,
         CancellationToken cancellationToken = default);

@@ -20,9 +20,9 @@ public sealed class RobotRepository : IRobotRepository
         CancellationToken cancellationToken = default)
     {
         var query = _dbContext.Robots
-    .AsNoTracking()
-    .Where(robot =>
-        _dbContext.CompanyMembers.Any(member =>
+            .AsNoTracking()
+            .Include(robot => robot.SceneBinding)
+            .Where(robot =>_dbContext.CompanyMembers.Any(member =>
             member.CompanyId == robot.CompanyId &&
             member.UserId == userId &&
             member.IsActive &&
@@ -44,7 +44,27 @@ public sealed class RobotRepository : IRobotRepository
     public Task<Robot?> GetByIdAsync(Guid robotId, CancellationToken cancellationToken = default)
     {
         return _dbContext.Robots
+            .Include(robot => robot.SceneBinding)
             .FirstOrDefaultAsync(robot => robot.Id == robotId, cancellationToken);
+    }
+
+    public Task<Robot?> GetByIdReadOnlyAsync(
+    Guid robotId,
+    CancellationToken cancellationToken = default)
+    {
+        return _dbContext.Robots
+            .AsNoTracking()
+            .Include(robot => robot.SceneBinding)
+            .FirstOrDefaultAsync(robot => robot.Id == robotId, cancellationToken);
+    }
+
+    public Task<RobotSceneBinding?> GetSceneBindingByRobotIdReadOnlyAsync(
+        Guid robotId,
+        CancellationToken cancellationToken = default)
+    {
+        return _dbContext.RobotSceneBindings
+            .AsNoTracking()
+            .FirstOrDefaultAsync(binding => binding.RobotId == robotId, cancellationToken);
     }
 
     public Task<int> CountActiveOwnedByUserIdAsync(
@@ -71,6 +91,35 @@ public sealed class RobotRepository : IRobotRepository
         await _dbContext.Robots.AddAsync(robot, cancellationToken);
     }
 
+    public async Task AddSceneBindingAsync(
+    RobotSceneBinding sceneBinding,
+    CancellationToken cancellationToken = default)
+    {
+        await _dbContext.RobotSceneBindings.AddAsync(sceneBinding, cancellationToken);
+    }
+
+    public async Task<bool> UpdateSceneBindingByRobotIdAsync(
+        RobotSceneBinding sceneBinding,
+        CancellationToken cancellationToken = default)
+    {
+        var affectedRows = await _dbContext.RobotSceneBindings
+            .Where(binding => binding.RobotId == sceneBinding.RobotId)
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(binding => binding.SceneType, sceneBinding.SceneType)
+                .SetProperty(binding => binding.BaseX, sceneBinding.BaseX)
+                .SetProperty(binding => binding.BaseY, sceneBinding.BaseY)
+                .SetProperty(binding => binding.BaseZ, sceneBinding.BaseZ)
+                .SetProperty(binding => binding.BaseYaw, sceneBinding.BaseYaw)
+                .SetProperty(binding => binding.UrdfPath, sceneBinding.UrdfPath)
+                .SetProperty(binding => binding.PrimPath, sceneBinding.PrimPath)
+                .SetProperty(binding => binding.RosNamespace, sceneBinding.RosNamespace)
+                .SetProperty(binding => binding.GraphPath, sceneBinding.GraphPath)
+                .SetProperty(binding => binding.UpdatedAt, sceneBinding.UpdatedAt),
+                cancellationToken);
+
+        return affectedRows > 0;
+    }
+
     public async Task<IReadOnlyList<Robot>> ListByStatusAsync(
     RobotStatus status,
     CancellationToken cancellationToken = default)
@@ -92,6 +141,7 @@ public sealed class RobotRepository : IRobotRepository
         }
 
         return await _dbContext.Robots
+            .Include(robot => robot.SceneBinding)
             .Where(robot => robotIds.Contains(robot.Id))
             .ToListAsync(cancellationToken);
     }

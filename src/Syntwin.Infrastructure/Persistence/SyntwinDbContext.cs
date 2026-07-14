@@ -18,12 +18,17 @@ public sealed class SyntwinDbContext : DbContext
     public DbSet<PaymentTransaction> PaymentTransactions => Set<PaymentTransaction>();
     public DbSet<EmailOtp> EmailOtps => Set<EmailOtp>();
     public DbSet<Robot> Robots => Set<Robot>();
+    public DbSet<RobotModel> RobotModels => Set<RobotModel>();
+    public DbSet<RobotSceneBinding> RobotSceneBindings => Set<RobotSceneBinding>();
     public DbSet<RobotRuntimeSession> RobotRuntimeSessions => Set<RobotRuntimeSession>();
     public DbSet<RobotCommand> RobotCommands => Set<RobotCommand>();
+    public DbSet<RobotSafetyPolicy> RobotSafetyPolicies => Set<RobotSafetyPolicy>();
     public DbSet<CommandResult> CommandResults => Set<CommandResult>();
     public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
     public DbSet<RobotProgram> RobotPrograms => Set<RobotProgram>();
     public DbSet<RobotProgramStep> RobotProgramSteps => Set<RobotProgramStep>();
+    public DbSet<FactoryRun> FactoryRuns => Set<FactoryRun>();
+    public DbSet<FactoryRunTarget> FactoryRunTargets => Set<FactoryRunTarget>();
     public DbSet<Company> Companies => Set<Company>();
     public DbSet<CompanyMember> CompanyMembers => Set<CompanyMember>();
 
@@ -37,12 +42,17 @@ public sealed class SyntwinDbContext : DbContext
         ConfigureUserSubscriptions(modelBuilder);
         ConfigurePaymentTransactions(modelBuilder);
         ConfigureEmailOtps(modelBuilder);
+        ConfigureRobotModels(modelBuilder);
         ConfigureRobots(modelBuilder);
+        ConfigureRobotSceneBindings(modelBuilder);
+        ConfigureRobotSafetyPolicies(modelBuilder);
         ConfigureRobotRuntimeSessions(modelBuilder);
         ConfigureRobotCommands(modelBuilder);
         ConfigureCommandResults(modelBuilder);
         ConfigureRobotPrograms(modelBuilder);
         ConfigureRobotProgramSteps(modelBuilder);
+        ConfigureFactoryRuns(modelBuilder);
+        ConfigureFactoryRunTargets(modelBuilder);
         ConfigureAuditLogs(modelBuilder);
         ConfigureCompanies(modelBuilder);
         ConfigureCompanyMembers(modelBuilder);
@@ -500,6 +510,83 @@ public sealed class SyntwinDbContext : DbContext
         });
     }
 
+    private static void ConfigureRobotModels(ModelBuilder modelBuilder)
+    {
+        var seedDate = new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
+        var fairinoFr5ModelId = Guid.Parse("8f1e8d7a-5b7a-4a0f-8b2e-4e5d9f0f0005");
+        modelBuilder.Entity<RobotModel>(entity =>
+        {
+            entity.ToTable("robot_models");
+
+            entity.HasKey(model => model.Id);
+
+            entity.Property(model => model.Vendor)
+                .IsRequired()
+                .HasMaxLength(80);
+
+            entity.Property(model => model.ModelCode)
+                .IsRequired()
+                .HasMaxLength(80);
+
+            entity.Property(model => model.DisplayName)
+                .IsRequired()
+                .HasMaxLength(150);
+
+            entity.Property(model => model.Dof)
+                .IsRequired();
+
+            entity.Property(model => model.Description)
+                .HasMaxLength(500);
+
+            entity.Property(model => model.UrdfPath)
+                .HasMaxLength(500);
+
+            entity.Property(model => model.MeshRootPath)
+                .HasMaxLength(500);
+
+            entity.Property(model => model.DefaultTcpFrame)
+                .HasMaxLength(100);
+
+            entity.Property(model => model.JointNamesJson)
+                .HasColumnType("nvarchar(max)");
+
+            entity.Property(model => model.JointLimitsJson)
+                .HasColumnType("nvarchar(max)");
+
+            entity.Property(model => model.IsActive)
+                .IsRequired()
+                .HasDefaultValue(true);
+
+            entity.Property(model => model.CreatedAt)
+                .IsRequired();
+
+            entity.HasIndex(model => new { model.Vendor, model.ModelCode })
+                .IsUnique()
+                .HasDatabaseName("UX_robot_models_vendor_model_code");
+
+            entity.HasIndex(model => model.IsActive)
+                .HasDatabaseName("IX_robot_models_is_active");
+
+            entity.HasData(new RobotModel
+            {
+                Id = fairinoFr5ModelId,
+                Vendor = "Fairino",
+                ModelCode = "FR5",
+                DisplayName = "Fairino FR5",
+                Dof = 6,
+                Description = "Fairino FR5 6-DOF collaborative robot model for simulator onboarding.",
+                UrdfPath = "/fairino_description/urdf/fairino5_v6.urdf",
+                MeshRootPath = "/fairino_description/meshes/fairino5_v6",
+                DefaultTcpFrame = "tool_link",
+                JointNamesJson = "[\"j1\",\"j2\",\"j3\",\"j4\",\"j5\",\"j6\"]",
+                JointLimitsJson = "[{\"joint\":1,\"minDeg\":-175,\"maxDeg\":175},{\"joint\":2,\"minDeg\":-265,\"maxDeg\":85},{\"joint\":3,\"minDeg\":-160,\"maxDeg\":160},{\"joint\":4,\"minDeg\":-265,\"maxDeg\":265},{\"joint\":5,\"minDeg\":-175,\"maxDeg\":175},{\"joint\":6,\"minDeg\":-175,\"maxDeg\":175}]",
+                IsActive = true,
+                CreatedAt = seedDate
+            });
+
+        });
+    }
+
     private static void ConfigureRobots(ModelBuilder modelBuilder)
     {
         modelBuilder.Entity<Robot>(entity =>
@@ -515,6 +602,9 @@ public sealed class SyntwinDbContext : DbContext
             entity.Property(robot => robot.Model)
                 .IsRequired()
                 .HasMaxLength(50);
+
+            entity.HasIndex(robot => robot.RobotModelId)
+                .HasDatabaseName("IX_robots_robot_model_id");
 
             entity.Property(robot => robot.ConnectionType)
                 .IsRequired()
@@ -561,6 +651,128 @@ public sealed class SyntwinDbContext : DbContext
                 .HasForeignKey(robot => robot.CompanyId)
                 .OnDelete(DeleteBehavior.Restrict);
 
+            entity.HasOne(robot => robot.RobotModel)
+                .WithMany(model => model.Robots)
+                .HasForeignKey(robot => robot.RobotModelId)
+                .OnDelete(DeleteBehavior.SetNull);
+
+        });
+    }
+
+    private static void ConfigureRobotSceneBindings(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<RobotSceneBinding>(entity =>
+        {
+            entity.ToTable("robot_scene_bindings");
+
+            entity.HasKey(binding => binding.Id);
+
+            entity.Property(binding => binding.SceneType)
+                .IsRequired()
+                .HasMaxLength(50)
+                .HasDefaultValue("FairinoStudio");
+
+            entity.Property(binding => binding.UrdfPath)
+                .HasMaxLength(500);
+
+            entity.Property(binding => binding.PrimPath)
+                .HasMaxLength(500);
+
+            entity.Property(binding => binding.RosNamespace)
+                .HasMaxLength(200);
+
+            entity.Property(binding => binding.GraphPath)
+                .HasMaxLength(500);
+
+            entity.Property(binding => binding.CreatedAt)
+                .IsRequired();
+
+            entity.HasIndex(binding => binding.RobotId)
+                .IsUnique()
+                .HasDatabaseName("UX_robot_scene_bindings_robot_id");
+
+            entity.HasIndex(binding => new { binding.SceneType, binding.RobotId })
+                .HasDatabaseName("IX_robot_scene_bindings_scene_robot");
+
+            entity.HasOne(binding => binding.Robot)
+                .WithOne(robot => robot.SceneBinding)
+                .HasForeignKey<RobotSceneBinding>(binding => binding.RobotId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+    }
+    private static void ConfigureRobotSafetyPolicies(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<RobotSafetyPolicy>(entity =>
+        {
+            entity.ToTable("robot_safety_policies");
+
+            entity.HasKey(policy => policy.Id);
+
+            entity.Property(policy => policy.Scope)
+                .HasConversion<string>()
+                .IsRequired()
+                .HasMaxLength(30);
+
+            entity.Property(policy => policy.Name)
+                .IsRequired()
+                .HasMaxLength(150);
+
+            entity.Property(policy => policy.RobotModel)
+                .IsRequired()
+                .HasMaxLength(80);
+
+            entity.Property(policy => policy.PolicyJson)
+                .IsRequired()
+                .HasColumnType("nvarchar(max)");
+
+            entity.Property(policy => policy.IsActive)
+                .IsRequired()
+                .HasDefaultValue(true);
+
+            entity.Property(policy => policy.CreatedAt)
+                .IsRequired();
+
+            entity.HasIndex(policy => policy.CompanyId)
+                .HasDatabaseName("IX_robot_safety_policies_company_id");
+
+            entity.HasIndex(policy => policy.RobotId)
+                .HasDatabaseName("IX_robot_safety_policies_robot_id");
+
+            entity.HasIndex(policy => new { policy.CompanyId, policy.Scope, policy.IsActive })
+                .HasDatabaseName("IX_robot_safety_policies_company_scope_active");
+
+            entity.HasIndex(policy => new { policy.RobotId, policy.Scope, policy.IsActive })
+                .HasDatabaseName("IX_robot_safety_policies_robot_scope_active");
+
+            entity.HasIndex(policy => new { policy.CompanyId, policy.Scope })
+                .IsUnique()
+                .HasFilter("[RobotId] IS NULL AND [IsActive] = 1")
+                .HasDatabaseName("UX_robot_safety_policies_company_active");
+
+            entity.HasIndex(policy => new { policy.RobotId, policy.Scope })
+                .IsUnique()
+                .HasFilter("[RobotId] IS NOT NULL AND [IsActive] = 1")
+                .HasDatabaseName("UX_robot_safety_policies_robot_active");
+
+            entity.HasOne(policy => policy.Company)
+                .WithMany(company => company.SafetyPolicies)
+                .HasForeignKey(policy => policy.CompanyId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(policy => policy.Robot)
+                .WithMany(robot => robot.SafetyPolicies)
+                .HasForeignKey(policy => policy.RobotId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(policy => policy.CreatedByUser)
+                .WithMany()
+                .HasForeignKey(policy => policy.CreatedByUserId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(policy => policy.UpdatedByUser)
+                .WithMany()
+                .HasForeignKey(policy => policy.UpdatedByUserId)
+                .OnDelete(DeleteBehavior.Restrict);
         });
     }
 
@@ -694,6 +906,154 @@ public sealed class SyntwinDbContext : DbContext
             entity.HasOne(result => result.Robot)
                 .WithMany(robot => robot.CommandResults)
                 .HasForeignKey(result => result.RobotId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+    }
+
+    private static void ConfigureFactoryRuns(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<FactoryRun>(entity =>
+        {
+            entity.ToTable("factory_runs");
+
+            entity.HasKey(factoryRun => factoryRun.Id);
+
+            entity.Property(factoryRun => factoryRun.Status)
+                .HasConversion<string>()
+                .IsRequired()
+                .HasMaxLength(50);
+
+            entity.Property(factoryRun => factoryRun.CoordinationMode)
+                .HasConversion<string>()
+                .HasDefaultValue(FactoryCoordinationMode.Synchronized)
+                .IsRequired()
+                .HasMaxLength(50);
+
+            entity.Property(factoryRun => factoryRun.FailurePolicy)
+                .HasConversion<string>()
+                .HasDefaultValue(FactoryFailurePolicy.IsolateTarget)
+                .IsRequired()
+                .HasMaxLength(50);
+
+            entity.Property(factoryRun => factoryRun.ProgramName)
+                .IsRequired()
+                .HasMaxLength(100);
+
+            entity.Property(factoryRun => factoryRun.LuaFileName)
+                .IsRequired()
+                .HasMaxLength(260);
+
+            entity.Property(factoryRun => factoryRun.LuaContent)
+                .IsRequired()
+                .HasColumnType("nvarchar(max)");
+
+            entity.Property(factoryRun => factoryRun.LuaContentHash)
+                .IsRequired()
+                .HasMaxLength(64);
+
+            entity.Property(factoryRun => factoryRun.TargetCount)
+                .IsRequired();
+
+            entity.Property(factoryRun => factoryRun.StepDurationsJson)
+    .HasColumnType("nvarchar(max)");
+
+            entity.Property(factoryRun => factoryRun.FailureReason)
+                .HasMaxLength(500);
+
+            entity.Property(factoryRun => factoryRun.CreatedAtUtc)
+                .IsRequired();
+
+            entity.HasIndex(factoryRun => factoryRun.CompanyId)
+                .HasDatabaseName("IX_factory_runs_company_id");
+
+            entity.HasIndex(factoryRun => factoryRun.CreatedByUserId)
+                .HasDatabaseName("IX_factory_runs_created_by_user_id");
+
+            entity.HasIndex(factoryRun => new { factoryRun.CompanyId, factoryRun.Status, factoryRun.CreatedAtUtc })
+                .HasDatabaseName("IX_factory_runs_company_status_created_at");
+
+            entity.HasOne(factoryRun => factoryRun.Company)
+                .WithMany()
+                .HasForeignKey(factoryRun => factoryRun.CompanyId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(factoryRun => factoryRun.CreatedByUser)
+                .WithMany()
+                .HasForeignKey(factoryRun => factoryRun.CreatedByUserId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+    }
+
+    private static void ConfigureFactoryRunTargets(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<FactoryRunTarget>(entity =>
+        {
+            entity.ToTable("factory_run_targets");
+
+            entity.HasKey(target => target.Id);
+
+            entity.Property(target => target.Status)
+                .HasConversion<string>()
+                .IsRequired()
+                .HasMaxLength(50);
+            entity.Property(target => target.TerminationReason)
+                .HasConversion<string>()
+                .HasMaxLength(50);
+
+            entity.Property(target => target.ReadinessError)
+                .HasMaxLength(500);
+
+            entity.Property(target => target.FailureReason)
+                .HasMaxLength(500);
+
+            entity.Property(target => target.EstimatedStepDurationsJson)
+    .HasColumnType("nvarchar(max)");
+
+            entity.Property(target => target.CreatedAtUtc)
+                .IsRequired();
+
+            entity.HasIndex(target => target.FactoryRunId)
+                .HasDatabaseName("IX_factory_run_targets_factory_run_id");
+
+            entity.HasIndex(target => target.RobotId)
+                .HasDatabaseName("IX_factory_run_targets_robot_id");
+
+            entity.HasIndex(target => target.ProgramId)
+                .HasDatabaseName("IX_factory_run_targets_program_id");
+
+            entity.HasIndex(target => target.PrepareCommandId)
+    .HasDatabaseName("IX_factory_run_targets_prepare_command_id");
+
+            entity.HasIndex(target => target.CommandId)
+                .HasDatabaseName("IX_factory_run_targets_command_id");
+
+            entity.HasIndex(target => new { target.FactoryRunId, target.RobotId })
+                .IsUnique()
+                .HasDatabaseName("UX_factory_run_targets_run_robot");
+
+            entity.HasOne(target => target.FactoryRun)
+                .WithMany(factoryRun => factoryRun.Targets)
+                .HasForeignKey(target => target.FactoryRunId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(target => target.Robot)
+                .WithMany()
+                .HasForeignKey(target => target.RobotId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(target => target.Program)
+                .WithMany()
+                .HasForeignKey(target => target.ProgramId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(target => target.PrepareCommand)
+                .WithMany()
+                .HasForeignKey(target => target.PrepareCommandId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(target => target.Command)
+                .WithMany()
+                .HasForeignKey(target => target.CommandId)
                 .OnDelete(DeleteBehavior.Restrict);
         });
     }
