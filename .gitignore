@@ -17,3 +17,7 @@ obj/
 Thumbs.db
 # Environment secrets
 .env
+
+# Local runtime recovery artifacts
+redis-backup/
+/tabilize factory run synchronization and robot isolation*
