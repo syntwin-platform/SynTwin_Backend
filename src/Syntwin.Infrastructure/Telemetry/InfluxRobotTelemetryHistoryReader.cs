@@ -83,7 +83,11 @@ public sealed class InfluxRobotTelemetryHistoryReader : IRobotTelemetryHistoryRe
         builder.AppendLine($"  |> range(start: time(v: \"{from}\"), stop: time(v: \"{to}\"))");
         builder.AppendLine($"  |> filter(fn: (r) => r._measurement == \"{MeasurementName}\")");
         builder.AppendLine($"  |> filter(fn: (r) => r.robotId == \"{query.RobotId}\")");
-
+        if (query.RuntimeSessionId.HasValue)
+        {
+            builder.AppendLine(
+                $"  |> filter(fn: (r) => r.sessionId == \"{query.RuntimeSessionId.Value}\")");
+        }
         var fields = GetSelectedFields(query.Fields);
 
         builder.AppendLine(

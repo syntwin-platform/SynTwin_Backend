@@ -19,25 +19,23 @@ public sealed class CompanyRepository : ICompanyRepository
         CancellationToken cancellationToken = default)
     {
         return await _dbContext.CompanyMembers
-    .AsNoTracking()
-    .Include(member => member.User)
-    .Include(member => member.Company)
-        .ThenInclude(company => company!.Members)
-        .ThenInclude(member => member.User)
-    .Include(member => member.Company)
-        .ThenInclude(company => company!.CreatedByUser)
-        .ThenInclude(owner => owner!.Subscriptions
-            .Where(subscription =>
-                subscription.Status == SubscriptionStatus.Active))
-        .ThenInclude(subscription => subscription.Plan)
-    .Where(member =>
-        member.UserId == userId &&
-        member.IsActive)
-    .OrderBy(member => member.Company!.Name)
-    .AsSplitQuery()
-    .ToListAsync(cancellationToken);
+            .Include(member => member.User)
+            .Include(member => member.Company)
+                .ThenInclude(company => company!.Members)
+                .ThenInclude(member => member.User)
+            .Include(member => member.Company)
+                .ThenInclude(company => company!.CreatedByUser)
+                .ThenInclude(owner => owner!.Subscriptions
+                    .Where(subscription =>
+                        subscription.Status == SubscriptionStatus.Active))
+                .ThenInclude(subscription => subscription.Plan)
+            .Where(member =>
+                member.UserId == userId &&
+                member.IsActive)
+            .OrderBy(member => member.Company!.Name)
+            .AsSplitQuery()
+            .ToListAsync(cancellationToken);
     }
-
     public async Task<IReadOnlyList<Company>> ListAllAsync(
         string? search,
         CancellationToken cancellationToken = default)

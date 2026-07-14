@@ -631,8 +631,10 @@ public sealed class RobotCommandService : IRobotCommandService
 
     private static bool IsBusyLockCommand(RobotCommandType commandType)
     {
-        return commandType != RobotCommandType.EStop;
+        return commandType is not RobotCommandType.EStop
+            and not RobotCommandType.PrepareProgram;
     }
+
 
     private static RobotCommandResponse ToResponse(RobotCommand command)
     {

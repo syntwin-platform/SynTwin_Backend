@@ -27,6 +27,13 @@ public interface IRobotService
         string? ipAddress,
         CancellationToken cancellationToken = default);
 
+    Task<RobotResponse?> UpdateSceneBindingAsync(
+    Guid userId,
+    Guid robotId,
+    RobotSceneBindingRequest request,
+    string? ipAddress,
+    CancellationToken cancellationToken = default);
+
     Task<bool> DisableAsync(
         Guid userId,
         Guid robotId,

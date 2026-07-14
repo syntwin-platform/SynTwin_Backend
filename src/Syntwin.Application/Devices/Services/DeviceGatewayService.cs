@@ -1,9 +1,10 @@
-using Microsoft.Extensions.Options;
+﻿using Microsoft.Extensions.Options;
 using Syntwin.Application.AuditLogs.Interfaces;
 using Syntwin.Application.Commands.Interfaces;
 using Syntwin.Application.Common.Interfaces;
 using Syntwin.Application.Devices.Dtos;
 using Syntwin.Application.Devices.Interfaces;
+using Syntwin.Application.FactoryRuns.Interfaces;
 using Syntwin.Application.Realtime.Dtos;
 using Syntwin.Application.Realtime.Interfaces;
 using Syntwin.Application.Robots.Dtos;
@@ -26,9 +27,11 @@ public sealed class DeviceGatewayService : IDeviceGatewayService
     private readonly TimeSpan _telemetryBroadcastMinInterval;
     private readonly IRobotRepository _robotRepository;
     private readonly IRobotCommandRepository _commandRepository;
+    private readonly IFactoryRunRepository _factoryRunRepository;
     private readonly IRobotCommandQueue _commandQueue;
     private readonly IRobotCommandTimeoutScheduler _commandTimeoutScheduler;
     private readonly IRobotBusyLock _robotBusyLock;
+    private readonly IDistributedLock _distributedLock;
     private readonly IAuditLogRepository _auditLogRepository;
     private readonly IPasswordHasher _passwordHasher;
     private readonly IRobotStateCache _robotStateCache;
@@ -41,11 +44,13 @@ public sealed class DeviceGatewayService : IDeviceGatewayService
     public DeviceGatewayService(
        IRobotRepository robotRepository,
     IRobotRuntimeSessionRepository runtimeSessionRepository,
-    IRobotCommandRepository commandRepository,
-    IRobotCommandQueue commandQueue,
-    IRobotCommandTimeoutScheduler commandTimeoutScheduler,
-    IRobotBusyLock robotBusyLock,
-    IAuditLogRepository auditLogRepository,
+IRobotCommandRepository commandRepository,
+IFactoryRunRepository factoryRunRepository,
+IRobotCommandQueue commandQueue,
+IRobotCommandTimeoutScheduler commandTimeoutScheduler,
+IRobotBusyLock robotBusyLock,
+IDistributedLock distributedLock,
+IAuditLogRepository auditLogRepository,
     IPasswordHasher passwordHasher,
     IRobotStateCache robotStateCache,
     IRobotRealtimeNotifier realtimeNotifier,
@@ -56,9 +61,11 @@ public sealed class DeviceGatewayService : IDeviceGatewayService
         _robotRepository = robotRepository;
         _runtimeSessionRepository = runtimeSessionRepository;
         _commandRepository = commandRepository;
+        _factoryRunRepository = factoryRunRepository;
         _commandQueue = commandQueue;
         _commandTimeoutScheduler = commandTimeoutScheduler;
         _robotBusyLock = robotBusyLock;
+        _distributedLock = distributedLock;
         _auditLogRepository = auditLogRepository;
         _passwordHasher = passwordHasher;
         _robotStateCache = robotStateCache;
@@ -131,9 +138,26 @@ public sealed class DeviceGatewayService : IDeviceGatewayService
             _deviceSessionTtl,
             cancellationToken);
 
+        var shouldBroadcastOnline = await MarkRuntimeOnlineAsync(
+            robot,
+            now,
+            cancellationToken);
+
+        if (shouldBroadcastOnline)
+        {
+            await _realtimeNotifier.NotifyRobotStatusChangedAsync(
+                CreateOnlineStatusChangedEvent(robot.Id, now),
+                cancellationToken);
+        }
+
+        var runtimeSessionId = await _robotStateCache.GetCurrentRuntimeSessionIdAsync(
+            robot.Id,
+            cancellationToken);
+
         return new DeviceSessionResponse
         {
             RobotId = robot.Id,
+            RuntimeSessionId = runtimeSessionId,
             AccessToken = token,
             ExpiresInSeconds = (int)_deviceSessionTtl.TotalSeconds
         };
@@ -712,6 +736,423 @@ CancellationToken cancellationToken)
             : TimeSpan.Zero;
     }
 
+    public async Task<DeviceFactoryRunArmSubmitResult> ArmFactoryRunCommandWithSessionAsync(
+    string accessToken,
+    DeviceFactoryRunArmRequest request,
+    string? ipAddress = null,
+    CancellationToken cancellationToken = default)
+    {
+        var session = await AuthenticateSessionAsync(
+            accessToken,
+            "factory-runs/armed",
+            ipAddress,
+            cancellationToken);
+
+        if (session is null)
+        {
+            return new DeviceFactoryRunArmSubmitResult
+            {
+                IsAuthenticated = false
+            };
+        }
+
+        return await ArmFactoryRunCommandAuthenticatedAsync(
+            session.RobotId,
+            request,
+            cancellationToken);
+    }
+
+    private async Task<DeviceFactoryRunStartedSubmitResult>
+    ReportFactoryRunStartedAuthenticatedAsync(
+        Guid robotId,
+        DeviceFactoryRunStartedRequest request,
+        CancellationToken cancellationToken)
+    {
+        if (request.RobotId != robotId)
+        {
+            throw new InvalidOperationException(
+                "RobotId in body does not match authenticated device.");
+        }
+
+        await using var factoryRunLock = await AcquireFactoryRunArmLockAsync(
+            request.FactoryRunId,
+            cancellationToken);
+
+        var factoryRun = await _factoryRunRepository.GetByIdForArmAsync(
+            request.FactoryRunId,
+            cancellationToken);
+
+        if (factoryRun is null)
+        {
+            throw new InvalidOperationException("Factory run not found.");
+        }
+
+        var target = factoryRun.Targets.FirstOrDefault(
+            item => item.Id == request.TargetId);
+
+        if (target is null)
+        {
+            throw new InvalidOperationException("Factory run target not found.");
+        }
+
+        if (target.RobotId != robotId)
+        {
+            throw new InvalidOperationException(
+                "Factory run target does not belong to authenticated robot.");
+        }
+
+        if (target.CommandId != request.CommandId)
+        {
+            throw new InvalidOperationException(
+                "Factory run command does not match target command.");
+        }
+
+        if (!factoryRun.ScheduledStartAtUtc.HasValue)
+        {
+            throw new InvalidOperationException(
+                "Factory run has no scheduled start time.");
+        }
+
+        var command = await _commandRepository.GetByIdForRobotAsync(
+            request.CommandId,
+            robotId,
+            cancellationToken);
+
+        if (command is null ||
+            command.CommandType != RobotCommandType.RunProgram)
+        {
+            throw new InvalidOperationException(
+                "RunProgram command was not found.");
+        }
+
+        var serverNow = DateTimeOffset.UtcNow;
+        var requestedActual = request.ActualStartedAtUtc ?? serverNow;
+
+        // Không chấp nhận clock client lệch quá xa.
+        var actualStartedAtUtc =
+            Math.Abs((requestedActual - serverNow).TotalSeconds) <= 30
+                ? requestedActual
+                : serverNow;
+        double? startLateByMsMetric = null;
+        double? startSkewMsMetric = null;
+
+        if (!target.ActualStartedAtUtc.HasValue)
+        {
+            target.ActualStartedAtUtc = actualStartedAtUtc;
+
+            var lateByMs = Math.Max(
+                0,
+                (actualStartedAtUtc - factoryRun.ScheduledStartAtUtc.Value)
+                    .TotalMilliseconds);
+
+            target.StartLateByMs = (int)Math.Min(
+                int.MaxValue,
+                Math.Round(lateByMs));
+
+            startLateByMsMetric = target.StartLateByMs.Value;
+
+            target.UpdatedAtUtc = serverNow;
+        }
+
+        var startParticipants = factoryRun.Targets
+            .Where(item => item.Status is not (
+                FactoryRunTargetStatus.Failed or FactoryRunTargetStatus.Cancelled))
+            .ToList();
+        var actualStarts = startParticipants
+            .Where(item => item.ActualStartedAtUtc.HasValue)
+            .Select(item => item.ActualStartedAtUtc!.Value)
+            .ToList();
+
+        var shouldRecordStartSkew = !factoryRun.ActualStartSkewMs.HasValue;
+
+        if (startParticipants.Count > 0 && actualStarts.Count == startParticipants.Count)
+        {
+            var skewMs = (
+                actualStarts.Max() -
+                actualStarts.Min()).TotalMilliseconds;
+
+            factoryRun.ActualStartSkewMs = (int)Math.Min(
+                int.MaxValue,
+                Math.Max(0, Math.Round(skewMs)));
+
+            if (shouldRecordStartSkew)
+            {
+                startSkewMsMetric = factoryRun.ActualStartSkewMs.Value;
+            }
+        }
+
+        factoryRun.UpdatedAtUtc = serverNow;
+
+        await _factoryRunRepository.SaveChangesAsync(cancellationToken);
+
+        if (startLateByMsMetric.HasValue)
+        {
+            _metrics.RecordFactoryRunActualStart(
+                startParticipants.Count,
+                startLateByMsMetric.Value);
+        }
+
+        if (startSkewMsMetric.HasValue)
+        {
+            _metrics.RecordFactoryRunStartSkew(
+                startParticipants.Count,
+                startSkewMsMetric.Value);
+        }
+
+        return new DeviceFactoryRunStartedSubmitResult
+        {
+            IsAuthenticated = true,
+            Response = new DeviceFactoryRunStartedResponse
+            {
+                FactoryRunId = factoryRun.Id,
+                TargetId = target.Id,
+                CommandId = request.CommandId,
+                RobotId = robotId,
+                ActualStartedAtUtc =
+                    target.ActualStartedAtUtc ?? actualStartedAtUtc,
+                StartLateByMs = target.StartLateByMs ?? 0,
+                ActualStartSkewMs = factoryRun.ActualStartSkewMs
+            }
+        };
+    }
+
+    private async Task<DeviceFactoryRunArmSubmitResult> ArmFactoryRunCommandAuthenticatedAsync(
+        Guid robotId,
+        DeviceFactoryRunArmRequest request,
+        CancellationToken cancellationToken)
+    {
+        if (request.RobotId != robotId)
+        {
+            throw new InvalidOperationException("RobotId in body does not match authenticated device.");
+        }
+
+        await using var factoryRunLock = await AcquireFactoryRunArmLockAsync(
+            request.FactoryRunId,
+            cancellationToken);
+
+        var factoryRun = await _factoryRunRepository.GetByIdForArmAsync(
+            request.FactoryRunId,
+            cancellationToken);
+        if (factoryRun is null)
+        {
+            throw new InvalidOperationException("Factory run not found.");
+        }
+
+        var target = factoryRun.Targets.FirstOrDefault(item => item.Id == request.TargetId);
+
+        if (target is null)
+        {
+            throw new InvalidOperationException("Factory run target not found.");
+        }
+
+        if (target.RobotId != robotId)
+        {
+            throw new InvalidOperationException("Factory run target does not belong to authenticated robot.");
+        }
+
+        if (target.CommandId != request.CommandId)
+        {
+            throw new InvalidOperationException("Factory run command does not match target command.");
+        }
+
+        var command = await _commandRepository.GetByIdForRobotAsync(
+            request.CommandId,
+            robotId,
+            cancellationToken);
+
+        if (command is null)
+        {
+            throw new InvalidOperationException("Command not found.");
+        }
+
+        if (command.CommandType != RobotCommandType.RunProgram)
+        {
+            throw new InvalidOperationException("Only RunProgram commands can arm a factory run target.");
+        }
+
+        if (command.Status is CommandStatus.Failed or CommandStatus.Timeout or CommandStatus.Cancelled)
+        {
+            throw new InvalidOperationException($"Command is already terminal: {command.Status}.");
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        var targetAlreadyArmed = target.Status is FactoryRunTargetStatus.Armed or FactoryRunTargetStatus.Running;
+        var hasStateChange = false;
+        var commandTimeoutExtended = false;
+        (double ArmSpreadMs, double LeadTimeMs)? barrierReadyMetric = null;
+
+        if (!targetAlreadyArmed)
+        {
+            target.CommandReceivedAtUtc ??= request.ReceivedAtUtc ?? now;
+            target.ArmedAtUtc ??= request.ArmedAtUtc ?? now;
+            target.RuntimeSessionId ??= await _robotStateCache.GetCurrentRuntimeSessionIdAsync(
+                robotId,
+                cancellationToken);
+
+            target.EstimatedStepDurationsJson = JsonSerializer.Serialize(
+                request.EstimatedStepDurationsMs.Select(duration => Math.Max(0, duration)).ToArray());
+
+            var estimatedProgramDurationMs = request.EstimatedStepDurationsMs
+                .Select(duration => Math.Max(0, duration))
+                .Aggregate(0L, (total, duration) => total + duration);
+            var estimatedTimeoutAt = now
+                .AddMilliseconds(estimatedProgramDurationMs)
+                .AddMinutes(2);
+
+            if (!command.TimeoutAt.HasValue || command.TimeoutAt < estimatedTimeoutAt)
+            {
+                command.TimeoutAt = estimatedTimeoutAt;
+                commandTimeoutExtended = true;
+            }
+
+            if (target.Status == FactoryRunTargetStatus.Starting)
+            {
+                target.Status = FactoryRunTargetStatus.Armed;
+            }
+
+            target.FailureReason = null;
+            target.UpdatedAtUtc = now;
+            hasStateChange = true;
+        }
+
+        var participatingTargets = factoryRun.FailurePolicy == FactoryFailurePolicy.IsolateTarget
+            ? factoryRun.Targets
+                .Where(item => item.Status is not (
+                    FactoryRunTargetStatus.Failed or FactoryRunTargetStatus.Cancelled))
+                .ToList()
+            : factoryRun.Targets.ToList();
+        var allTargetsArmed = participatingTargets.Count > 0 && participatingTargets.All(item =>
+            item.Status is FactoryRunTargetStatus.Armed or FactoryRunTargetStatus.Running);
+
+        if (allTargetsArmed && !factoryRun.ScheduledStartAtUtc.HasValue)
+        {
+            var commonStepDurationsMs = BuildCommonStepDurations(factoryRun);
+
+            var armedTimes = participatingTargets
+                .Where(item => item.ArmedAtUtc.HasValue)
+                .Select(item => item.ArmedAtUtc!.Value)
+                .ToList();
+
+            var armSpreadMs = armedTimes.Count > 1
+                ? (armedTimes.Max() - armedTimes.Min()).TotalMilliseconds
+                : 0;
+            var serverAcceptedArmTimes = participatingTargets
+                .Where(item => item.ArmedAtUtc.HasValue && item.UpdatedAtUtc.HasValue)
+                .Select(item => item.UpdatedAtUtc!.Value)
+                .ToList();
+            var serverArmSpreadMs = serverAcceptedArmTimes.Count > 1
+                ? (serverAcceptedArmTimes.Max() - serverAcceptedArmTimes.Min()).TotalMilliseconds
+                : 0;
+            var observedArmSpreadMs = Math.Max(armSpreadMs, serverArmSpreadMs);
+            var startLeadTime = GetFactoryRunStartLeadTime(
+                participatingTargets.Count,
+                observedArmSpreadMs);
+            var scheduledStartAtUtc = now.Add(startLeadTime);
+
+            barrierReadyMetric = (
+                observedArmSpreadMs,
+                startLeadTime.TotalMilliseconds);
+
+            factoryRun.ScheduledStartAtUtc = scheduledStartAtUtc;
+            factoryRun.StepDurationsJson = JsonSerializer.Serialize(commonStepDurationsMs);
+
+            factoryRun.StartedAtUtc = scheduledStartAtUtc;
+            var hasIsolatedTarget = participatingTargets.Count < factoryRun.Targets.Count;
+            factoryRun.Status = hasIsolatedTarget
+                ? FactoryRunStatus.RunningDegraded
+                : FactoryRunStatus.Running;
+            factoryRun.FailureReason = hasIsolatedTarget
+                ? "One or more targets were isolated before synchronized start."
+                : null;
+            factoryRun.UpdatedAtUtc = now;
+
+            foreach (var armedTarget in participatingTargets)
+            {
+                if (armedTarget.Status == FactoryRunTargetStatus.Armed)
+                {
+                    armedTarget.Status = FactoryRunTargetStatus.Running;
+                    armedTarget.StartedAtUtc = scheduledStartAtUtc;
+                    armedTarget.FailureReason = null;
+                    armedTarget.UpdatedAtUtc = now;
+                }
+            }
+
+            hasStateChange = true;
+        }
+        else if (hasStateChange)
+        {
+            factoryRun.UpdatedAtUtc = now;
+        }
+
+        if (hasStateChange)
+        {
+            await _factoryRunRepository.SaveChangesAsync(cancellationToken);
+        }
+
+        if (commandTimeoutExtended)
+        {
+            await _commandTimeoutScheduler.ScheduleAsync(command, cancellationToken);
+        }
+
+        if (barrierReadyMetric.HasValue)
+        {
+            _metrics.RecordFactoryRunBarrierReady(
+                participatingTargets.Count,
+                barrierReadyMetric.Value.ArmSpreadMs,
+                barrierReadyMetric.Value.LeadTimeMs);
+        }
+
+        var isReady = factoryRun.ScheduledStartAtUtc.HasValue &&
+            factoryRun.Status is FactoryRunStatus.Running or FactoryRunStatus.RunningDegraded;
+
+        _metrics.RecordFactoryRunArmPoll(isReady);
+
+        return new DeviceFactoryRunArmSubmitResult
+        {
+            IsAuthenticated = true,
+            Response = new DeviceFactoryRunArmResponse
+            {
+                FactoryRunId = factoryRun.Id,
+                TargetId = target.Id,
+                CommandId = request.CommandId,
+                RobotId = robotId,
+                IsReady = isReady,
+                Status = target.Status.ToString(),
+                ScheduledStartAtUtc = factoryRun.ScheduledStartAtUtc,
+                ExpectedParticipantCount = participatingTargets.Count,
+                StepDurationsMs = DeserializeStepDurations(factoryRun.StepDurationsJson)
+            }
+        };
+    }
+
+    public async Task<DeviceFactoryRunStartedSubmitResult>
+    ReportFactoryRunStartedWithSessionAsync(
+        string accessToken,
+        DeviceFactoryRunStartedRequest request,
+        string? ipAddress = null,
+        CancellationToken cancellationToken = default)
+    {
+        var session = await AuthenticateSessionAsync(
+            accessToken,
+            "factory-runs/started",
+            ipAddress,
+            cancellationToken);
+
+        if (session is null)
+        {
+            return new DeviceFactoryRunStartedSubmitResult
+            {
+                IsAuthenticated = false
+            };
+        }
+
+        return await ReportFactoryRunStartedAuthenticatedAsync(
+            session.RobotId,
+            request,
+            cancellationToken);
+    }
+
+
     public async Task<DeviceCommandResultSubmitResult> SubmitCommandResultWithSessionAsync(
     string accessToken,
     DeviceCommandResultRequest request,
@@ -798,10 +1239,10 @@ CancellationToken cancellationToken)
   string? ipAddress,
   CancellationToken cancellationToken)
     {
-        if (request.RobotId != robotId)
-        {
-            throw new InvalidOperationException("RobotId in body does not match authenticated device.");
-        }
+if (request.RobotId != robotId)
+{
+    throw new InvalidOperationException("RobotId in body does not match authenticated device.");
+}
 
         var requestedStatus = ValidateCommandResultStatus(request);
 
@@ -866,6 +1307,23 @@ CancellationToken cancellationToken)
 
         await _commandRepository.SaveChangesAsync(cancellationToken);
 
+        if (
+            command.CommandType == RobotCommandType.PrepareProgram &&
+            requestedStatus is CommandStatus.Failed or CommandStatus.Timeout or CommandStatus.Cancelled)
+        {
+            var target = await _factoryRunRepository.GetTargetByPrepareCommandIdAsync(
+                command.Id,
+                cancellationToken);
+
+            if (target is not null)
+            {
+                await _robotBusyLock.ReleaseAsync(
+                    target.RobotId,
+                    target.Id,
+                    cancellationToken);
+            }
+        }
+
         await _commandTimeoutScheduler.RemoveAsync(
             command.Id,
             cancellationToken);
@@ -894,9 +1352,116 @@ CancellationToken cancellationToken)
         };
     }
 
+    private async Task<IDistributedLockHandle> AcquireFactoryRunArmLockAsync(
+    Guid factoryRunId,
+    CancellationToken cancellationToken)
+    {
+        var lockKey = $"factory-run:{factoryRunId:N}:arm";
+
+        // Tối đa khoảng 5 giây. Bình thường lock chỉ giữ vài chục ms.
+        for (var attempt = 0; attempt < 200; attempt++)
+        {
+            var handle = await _distributedLock.TryAcquireAsync(
+                lockKey,
+                TimeSpan.FromSeconds(10),
+                cancellationToken);
+
+            if (handle is not null)
+            {
+                return handle;
+            }
+
+            await Task.Delay(25, cancellationToken);
+        }
+
+        throw new InvalidOperationException(
+            "Factory run barrier is busy. Please retry the arm request.");
+    }
+
+    private static TimeSpan GetFactoryRunStartLeadTime(
+        int targetCount,
+        double observedArmSpreadMs)
+    {
+        double baseLeadTimeMs;
+
+        if (targetCount <= 1)
+        {
+            baseLeadTimeMs = 600;
+        }
+        else if (targetCount <= 5)
+        {
+            baseLeadTimeMs = 1000;
+        }
+        else if (targetCount <= 10)
+        {
+            baseLeadTimeMs = 1500;
+        }
+        else
+        {
+            baseLeadTimeMs = 2000;
+        }
+
+        // A slow arm cohort needs time for the already-armed devices to poll once
+        // more and receive the committed epoch. Fast cohorts retain the short base
+        // lead time; slow cohorts adapt without using a fixed long delay every run.
+        var propagationMarginMs = Math.Max(750, targetCount * 200);
+        var adaptiveLeadTimeMs = observedArmSpreadMs + propagationMarginMs;
+        var finalLeadTimeMs = Math.Clamp(
+            Math.Max(baseLeadTimeMs, adaptiveLeadTimeMs),
+            baseLeadTimeMs,
+            10000);
+
+        return TimeSpan.FromMilliseconds(finalLeadTimeMs);
+    }
+
+
+    private static IReadOnlyList<int> BuildCommonStepDurations(FactoryRun factoryRun)
+    {
+        var estimates = factoryRun.Targets
+            .Select(target => DeserializeStepDurations(target.EstimatedStepDurationsJson))
+            .Where(durations => durations.Count > 0)
+            .ToList();
+
+        if (estimates.Count == 0)
+        {
+            return Array.Empty<int>();
+        }
+
+        var maxStepCount = estimates.Max(durations => durations.Count);
+        var common = new int[maxStepCount];
+
+        for (var index = 0; index < maxStepCount; index++)
+        {
+            common[index] = estimates
+                .Select(durations => index < durations.Count ? durations[index] : 0)
+                .DefaultIfEmpty(0)
+                .Max();
+        }
+
+        return common.Select(duration => Math.Max(50, duration)).ToArray();
+    }
+
+    private static IReadOnlyList<int> DeserializeStepDurations(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json))
+        {
+            return Array.Empty<int>();
+        }
+
+        try
+        {
+            return JsonSerializer.Deserialize<int[]>(json) ?? Array.Empty<int>();
+        }
+        catch
+        {
+            return Array.Empty<int>();
+        }
+    }
+
     private static bool IsBusyLockCommand(RobotCommandType commandType)
     {
-        return commandType != RobotCommandType.EStop;
+        return commandType is not RobotCommandType.EStop
+            and not RobotCommandType.PrepareProgram;
     }
 
     private async Task<(bool IsAllowed, bool ShouldBroadcastOnline)> MarkRuntimeOnlineFromSessionAsync(

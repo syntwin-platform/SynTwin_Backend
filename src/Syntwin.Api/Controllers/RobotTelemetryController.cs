@@ -37,6 +37,7 @@ public sealed class RobotTelemetryController : ControllerBase
         [FromQuery] DateTimeOffset? to,
         [FromQuery] int? intervalSeconds,
         [FromQuery] int? limit,
+        [FromQuery] Guid? runtimeSessionId,
         [FromQuery] string[]? fields,
         CancellationToken cancellationToken)
     {
@@ -74,6 +75,7 @@ public sealed class RobotTelemetryController : ControllerBase
         var query = new RobotTelemetryHistoryQuery
         {
             RobotId = robotId,
+            RuntimeSessionId = runtimeSessionId,
             From = rangeFrom,
             To = rangeTo,
             Interval = intervalSeconds.HasValue && intervalSeconds.Value > 0

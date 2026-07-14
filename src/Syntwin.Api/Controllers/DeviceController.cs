@@ -187,20 +187,90 @@ public sealed class DeviceController : ControllerBase
     [FromQuery] int waitSeconds,
     CancellationToken cancellationToken)
     {
-        DevicePendingCommandResult command;
+        try
+        {
+            DevicePendingCommandResult command;
 
-        if (TryReadBearerToken(authorization, out var accessToken))
-        {
-            command = await _deviceGatewayService.TakePendingCommandWithSessionAsync(
-    accessToken,
-    isBusy,
-    waitSeconds,
-    GetClientIpAddress(),
-    cancellationToken);
+            if (TryReadBearerToken(authorization, out var accessToken))
+            {
+                command = await _deviceGatewayService.TakePendingCommandWithSessionAsync(
+                    accessToken,
+                    isBusy,
+                    waitSeconds,
+                    GetClientIpAddress(),
+                    cancellationToken);
+            }
+            else
+            {
+                if (!_allowLegacyDeviceSecretAuth)
+                {
+                    return Unauthorized(new
+                    {
+                        message =   
+                            "Device session token is required. " +
+                            "Create a session with POST /api/device/session."
+                    });
+                }
+
+                if (string.IsNullOrWhiteSpace(robotIdHeader) ||
+                    string.IsNullOrWhiteSpace(deviceSecret) ||
+                    !Guid.TryParse(robotIdHeader, out var robotId))
+                {
+                    return Unauthorized(new
+                    {
+                        message = "Missing or invalid device credentials."
+                    });
+                }
+
+                command = await _deviceGatewayService.TakePendingCommandAsync(
+                    robotId,
+                    deviceSecret,
+                    isBusy,
+                    waitSeconds,
+                    GetClientIpAddress(),
+                    cancellationToken);
+            }
+
+            if (!command.IsAuthenticated)
+            {
+                return Unauthorized(new
+                {
+                    message = "Invalid device session or credentials."
+                });
+            }
+
+            if (command.IsDisabled)
+            {
+                return StatusCode(
+                    StatusCodes.Status403Forbidden,
+                    new { message = "Robot is disabled." });
+            }
+
+            return command.Command is null
+                ? NoContent()
+                : Ok(command.Command);
         }
-        else
+        catch (OperationCanceledException)
+            when (cancellationToken.IsCancellationRequested)
         {
-            if (!_allowLegacyDeviceSecretAuth)
+            // Disconnecting the simulator intentionally cancels its long-poll request.
+            return NoContent();
+        }
+    }
+
+    [HttpPost("factory-runs/armed")]
+    [ProducesResponseType(typeof(DeviceFactoryRunArmResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    public async Task<IActionResult> ArmFactoryRun(
+    [FromHeader(Name = "Authorization")] string? authorization,
+    [FromBody] DeviceFactoryRunArmRequest request,
+    CancellationToken cancellationToken)
+    {
+        try
+        {
+            if (!TryReadBearerToken(authorization, out var accessToken))
             {
                 return Unauthorized(new
                 {
@@ -208,36 +278,85 @@ public sealed class DeviceController : ControllerBase
                 });
             }
 
-            if (string.IsNullOrWhiteSpace(robotIdHeader) ||
-                string.IsNullOrWhiteSpace(deviceSecret) ||
-                !Guid.TryParse(robotIdHeader, out var robotId))
-            {
-                return Unauthorized(new { message = "Missing or invalid device credentials." });
-            }
-
-            command = await _deviceGatewayService.TakePendingCommandAsync(
-                robotId,
-                deviceSecret,
-                isBusy,
-                waitSeconds,
+            var result = await _deviceGatewayService.ArmFactoryRunCommandWithSessionAsync(
+                accessToken,
+                request,
                 GetClientIpAddress(),
                 cancellationToken);
-        }
 
-        if (!command.IsAuthenticated)
+            if (!result.IsAuthenticated)
+            {
+                return Unauthorized(new { message = "Invalid device session." });
+            }
+
+            if (result.IsDisabled)
+            {
+                return StatusCode(StatusCodes.Status403Forbidden, new { message = "Robot is disabled." });
+            }
+
+            return Ok(result.Response);
+        }
+        catch (InvalidOperationException exception)
         {
-            return Unauthorized(new { message = "Invalid device session or credentials." });
+            return BadRequest(new { message = exception.Message });
         }
-
-        if (command.IsDisabled)
-        {
-            return StatusCode(
-                StatusCodes.Status403Forbidden,
-                new { message = "Robot is disabled." });
-        }
-
-        return command.Command is null ? NoContent() : Ok(command.Command);
     }
+
+    [HttpPost("factory-runs/started")]
+    [ProducesResponseType(
+    typeof(DeviceFactoryRunStartedResponse),
+    StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    public async Task<IActionResult> ReportFactoryRunStarted(
+    [FromHeader(Name = "Authorization")] string? authorization,
+    [FromBody] DeviceFactoryRunStartedRequest request,
+    CancellationToken cancellationToken)
+    {
+        try
+        {
+            if (!TryReadBearerToken(authorization, out var accessToken))
+            {
+                return Unauthorized(new
+                {
+                    message =
+                        "Device session token is required. " +
+                        "Create a session with POST /api/device/session."
+                });
+            }
+
+            var result =
+                await _deviceGatewayService
+                    .ReportFactoryRunStartedWithSessionAsync(
+                        accessToken,
+                        request,
+                        GetClientIpAddress(),
+                        cancellationToken);
+
+            if (!result.IsAuthenticated)
+            {
+                return Unauthorized(new
+                {
+                    message = "Invalid device session."
+                });
+            }
+
+            if (result.IsDisabled)
+            {
+                return StatusCode(
+                    StatusCodes.Status403Forbidden,
+                    new { message = "Robot is disabled." });
+            }
+
+            return Ok(result.Response);
+        }
+        catch (InvalidOperationException exception)
+        {
+            return BadRequest(new { message = exception.Message });
+        }
+    }
+
 
     [HttpPost("commands/result")]
     [ProducesResponseType(typeof(DeviceCommandResultResponse), StatusCodes.Status200OK)]

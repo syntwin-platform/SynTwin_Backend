@@ -43,6 +43,19 @@ CancellationToken cancellationToken = default);
         string? ipAddress = null,
         CancellationToken cancellationToken = default);
 
+    Task<DeviceFactoryRunArmSubmitResult> ArmFactoryRunCommandWithSessionAsync(
+    string accessToken,
+    DeviceFactoryRunArmRequest request,
+    string? ipAddress = null,
+    CancellationToken cancellationToken = default);
+
+    Task<DeviceFactoryRunStartedSubmitResult>
+    ReportFactoryRunStartedWithSessionAsync(
+        string accessToken,
+        DeviceFactoryRunStartedRequest request,
+        string? ipAddress = null,
+        CancellationToken cancellationToken = default);
+
     Task<DeviceCommandResultSubmitResult> SubmitCommandResultWithSessionAsync(
     string accessToken,
     DeviceCommandResultRequest request,

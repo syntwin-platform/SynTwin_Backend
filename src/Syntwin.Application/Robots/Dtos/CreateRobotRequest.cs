@@ -6,6 +6,8 @@ public sealed class CreateRobotRequest
 {
     public Guid CompanyId { get; set; }
 
+    public Guid? RobotModelId { get; set; }
+
     [Required]
     [MaxLength(100)]
     public string RobotName { get; set; } = string.Empty;
@@ -22,4 +24,6 @@ public sealed class CreateRobotRequest
 
     [Range(1, 65535)]
     public int? Port { get; set; }
+
+    public RobotSceneBindingRequest? SceneBinding { get; set; }
 }

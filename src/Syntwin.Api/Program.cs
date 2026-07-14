@@ -45,6 +45,7 @@ builder.Services
 builder.Services.AddScoped<IRobotRealtimeNotifier, SignalRRobotRealtimeNotifier>();
 builder.Services.AddHostedService<RobotOfflineMonitorService>();
 builder.Services.AddHostedService<RobotCommandTimeoutMonitorService>();
+builder.Services.AddHostedService<FactoryRunLockMaintenanceService>();
 builder.Services.AddHostedService<RobotLastSeenFlushService>();
 
 var allowedOrigins = builder.Configuration

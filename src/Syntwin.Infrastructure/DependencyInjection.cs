@@ -16,6 +16,8 @@ using Syntwin.Application.Companies.Interfaces;
 using Syntwin.Application.Companies.Services;
 using Syntwin.Application.Devices.Interfaces;
 using Syntwin.Application.Devices.Services;
+using Syntwin.Application.FactoryRuns.Interfaces;
+using Syntwin.Application.FactoryRuns.Services;
 using Syntwin.Application.LuaParsing.Interfaces;
 using Syntwin.Application.LuaParsing.Services;
 using Syntwin.Application.Payments.Interfaces;
@@ -39,6 +41,7 @@ using Syntwin.Infrastructure.Payments.VnPay;
 using Syntwin.Infrastructure.Persistence;
 using Syntwin.Infrastructure.Robots;
 using Syntwin.Infrastructure.Telemetry;
+using Syntwin.Infrastructure.FactoryRuns;
 
 namespace Syntwin.Infrastructure;
 
@@ -118,6 +121,8 @@ public static class DependencyInjection
         services.AddScoped<IVnPayGateway, VnPayGateway>();
         services.AddScoped<IPaymentService, PaymentService>();
         services.AddScoped<IRobotRepository, RobotRepository>();
+        services.AddScoped<IRobotModelRepository, RobotModelRepository>();
+        services.AddScoped<IRobotModelService, RobotModelService>();
         services.AddScoped<IRobotRuntimeSessionRepository, RobotRuntimeSessionRepository>();
         services.AddScoped<IRobotAccessService, RobotAccessService>();
         services.AddScoped<IRobotService, RobotService>();
@@ -127,6 +132,9 @@ public static class DependencyInjection
         services.AddScoped<IRobotBusyLock, RedisRobotBusyLock>();
         services.AddScoped<IRobotCommandTimeoutScheduler, RedisRobotCommandTimeoutScheduler>();
         services.AddScoped<IRobotCommandService, RobotCommandService>();
+        services.AddScoped<IFactoryRunRepository, FactoryRunRepository>();
+        services.AddScoped<IFactoryRunProgramPreparationExecutor,ScopedFactoryRunProgramPreparationExecutor>();
+        services.AddScoped<IFactoryRunService, FactoryRunService>();
         services.AddScoped<IDeviceGatewayService, DeviceGatewayService>();
         services.AddScoped<IRobotProgramRepository, RobotProgramRepository>();
         services.AddScoped<IRobotProgramService, RobotProgramService>();

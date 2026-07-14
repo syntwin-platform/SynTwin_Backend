@@ -24,6 +24,10 @@ public sealed class RobotRuntimeOptions
 
     public int RobotBusyLockTtlSeconds { get; set; } = 300;
 
+    public int FactoryRunBusyLockTtlSeconds { get; set; } = 900;
+
+    public int FactoryRunLockMaintenanceIntervalSeconds { get; set; } = 30;
+
     public int PendingCommandPollIntervalMilliseconds { get; set; } = 250;
 
     public int PendingCommandMaxWaitSeconds { get; set; } = 25;

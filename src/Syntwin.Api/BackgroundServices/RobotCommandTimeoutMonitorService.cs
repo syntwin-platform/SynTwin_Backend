@@ -7,6 +7,7 @@ using Syntwin.Domain.Entities;
 using Syntwin.Domain.Enums;
 using Syntwin.Application.Robots.Options;
 using Syntwin.Application.Common.Interfaces;
+using Syntwin.Application.FactoryRuns.Interfaces;
 
 namespace Syntwin.Api.BackgroundServices;
 
@@ -82,6 +83,7 @@ public sealed class RobotCommandTimeoutMonitorService : BackgroundService
         var auditLogRepository = scope.ServiceProvider.GetRequiredService<IAuditLogRepository>();
         var realtimeNotifier = scope.ServiceProvider.GetRequiredService<IRobotRealtimeNotifier>();
         var robotBusyLock = scope.ServiceProvider.GetRequiredService<IRobotBusyLock>();
+        var factoryRunRepository = scope.ServiceProvider.GetRequiredService<IFactoryRunRepository>();
 
         var now = DateTimeOffset.UtcNow;
         var dueCommandIds = await timeoutScheduler.ListDueCommandIdsAsync(
@@ -175,6 +177,17 @@ public sealed class RobotCommandTimeoutMonitorService : BackgroundService
             {
                 busyLockReleases.Add((command.RobotId, command.Id));
             }
+            else if (command.CommandType == RobotCommandType.PrepareProgram)
+            {
+                var target = await factoryRunRepository.GetTargetByPrepareCommandIdAsync(
+                    command.Id,
+                    cancellationToken);
+
+                if (target is not null)
+                {
+                    busyLockReleases.Add((target.RobotId, target.Id));
+                }
+            }
         }
 
         if (completedEvents.Count == 0)
@@ -209,6 +222,7 @@ public sealed class RobotCommandTimeoutMonitorService : BackgroundService
 
     private static bool IsBusyLockCommand(RobotCommandType commandType)
     {
-        return commandType != RobotCommandType.EStop;
+        return commandType is not RobotCommandType.EStop
+            and not RobotCommandType.PrepareProgram;
     }
 }

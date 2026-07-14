@@ -33,6 +33,19 @@ public sealed class RedisRobotCommandQueue : IRobotCommandQueue
             command.Id.ToString());
     }
 
+    public async Task EnqueueManyAsync(
+    IReadOnlyCollection<RobotCommand> commands,
+    CancellationToken cancellationToken = default)
+    {
+        if (commands.Count == 0)
+        {
+            return;
+        }
+
+        await Task.WhenAll(commands.Select(command => EnqueueAsync(command, cancellationToken)));
+    }
+
+
     public async Task RequeueAsync(
     RobotCommand command,
     CancellationToken cancellationToken = default)

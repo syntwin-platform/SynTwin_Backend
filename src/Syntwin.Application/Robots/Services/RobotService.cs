@@ -107,6 +107,7 @@ public sealed class RobotService : IRobotService
             CompanyId = request.CompanyId,
             RobotName = request.RobotName.Trim(),
             Model = request.Model.Trim(),
+            RobotModelId = request.RobotModelId,
             ConnectionType = string.IsNullOrWhiteSpace(request.ConnectionType)
                 ? "HTTP"
                 : request.ConnectionType.Trim(),
@@ -116,6 +117,11 @@ public sealed class RobotService : IRobotService
             Port = request.Port,
             CreatedAt = DateTimeOffset.UtcNow
         };
+
+        if (request.SceneBinding is not null)
+        {
+            robot.SceneBinding = CreateSceneBinding(robot.Id, request.SceneBinding);
+        }
 
         await _robotRepository.AddAsync(robot, cancellationToken);
         await _auditLogRepository.AddAsync(new AuditLog
@@ -286,12 +292,25 @@ public sealed class RobotService : IRobotService
 
         robot.RobotName = request.RobotName.Trim();
         robot.Model = request.Model.Trim();
+        robot.RobotModelId = request.RobotModelId;
         robot.ConnectionType = string.IsNullOrWhiteSpace(request.ConnectionType)
             ? "HTTP"
             : request.ConnectionType.Trim();
         robot.IpAddress = NormalizeNullable(request.IpAddress);
         robot.Port = request.Port;
         robot.UpdatedAt = DateTimeOffset.UtcNow;
+
+        if (request.SceneBinding is not null)
+        {
+            if (robot.SceneBinding is null)
+            {
+                robot.SceneBinding = CreateSceneBinding(robot.Id, request.SceneBinding);
+            }
+            else
+            {
+                ApplySceneBinding(robot.SceneBinding, request.SceneBinding);
+            }
+        }
 
         await _auditLogRepository.AddAsync(new AuditLog
         {
@@ -305,6 +324,75 @@ public sealed class RobotService : IRobotService
         }, cancellationToken);
 
         await _robotRepository.SaveChangesAsync(cancellationToken);
+
+        return ToResponse(robot, role.Value);
+    }
+
+    public async Task<RobotResponse?> UpdateSceneBindingAsync(
+        Guid userId,
+        Guid robotId,
+        RobotSceneBindingRequest request,
+        string? ipAddress,
+        CancellationToken cancellationToken = default)
+    {
+        var robot = await _robotRepository.GetByIdReadOnlyAsync(robotId, cancellationToken);
+
+        if (robot is null)
+        {
+            return null;
+        }
+
+        var role = await GetRoleAsync(userId, robot.CompanyId, cancellationToken);
+        if (!role.HasValue)
+        {
+            return null;
+        }
+
+        if (robot.Status == RobotStatus.Disabled)
+        {
+            throw new InvalidOperationException("Disabled robot scene binding cannot be updated.");
+        }
+
+        var sceneBinding = await _robotRepository.GetSceneBindingByRobotIdReadOnlyAsync(
+            robot.Id,
+            cancellationToken);
+
+        if (sceneBinding is null)
+        {
+            sceneBinding = CreateSceneBinding(robot.Id, request);
+
+            await _robotRepository.AddSceneBindingAsync(
+                sceneBinding,
+                cancellationToken);
+        }
+        else
+        {
+            ApplySceneBinding(sceneBinding, request);
+
+            var updated = await _robotRepository.UpdateSceneBindingByRobotIdAsync(
+                sceneBinding,
+                cancellationToken);
+
+            if (!updated)
+            {
+                throw new InvalidOperationException("Robot scene binding could not be updated. Refresh robot data and try again.");
+            }
+        }
+
+        await _auditLogRepository.AddAsync(new AuditLog
+        {
+            UserId = userId,
+            RobotId = robot.Id,
+            Action = "ROBOT_SCENE_BINDING_UPDATED",
+            IpAddress = NormalizeNullable(ipAddress),
+            Message = $"Robot '{robot.RobotName}' scene binding was updated.",
+            RawPayloadJson = CreateAuditContext(robot.CompanyId, role.Value),
+            CreatedAt = DateTimeOffset.UtcNow
+        }, cancellationToken);
+
+        await _robotRepository.SaveChangesAsync(cancellationToken);
+
+        robot.SceneBinding = sceneBinding;
 
         return ToResponse(robot, role.Value);
     }
@@ -458,8 +546,8 @@ public sealed class RobotService : IRobotService
             {
                 MoveL = new MoveLPolicyResponse
                 {
-                    MaxDistanceMm = 300,
-                    MaxRotationDeg = 45,
+                    MaxDistanceMm = 800,
+                    MaxRotationDeg = 180,
                     WaypointSpacingMm = 5,
                     TimeoutMs = 20_000
                 },
@@ -487,6 +575,7 @@ public sealed class RobotService : IRobotService
             Id = robot.Id,
             UserId = robot.UserId,
             CompanyId = robot.CompanyId,
+            RobotModelId = robot.RobotModelId,
             CurrentUserRole = role.ToString(),
             RobotName = robot.RobotName,
             Model = robot.Model,
@@ -496,7 +585,8 @@ public sealed class RobotService : IRobotService
             IpAddress = robot.IpAddress,
             Port = robot.Port,
             CreatedAt = robot.CreatedAt,
-            UpdatedAt = robot.UpdatedAt
+            UpdatedAt = robot.UpdatedAt,
+            SceneBinding = robot.SceneBinding is null ? null : ToSceneBindingResponse(robot.SceneBinding)
         };
     }
 
@@ -593,6 +683,69 @@ public sealed class RobotService : IRobotService
             ? RobotStatus.Offline.ToString()
             : cachedStatus;
     }
+
+    private static RobotSceneBinding CreateSceneBinding(
+    Guid robotId,
+    RobotSceneBindingRequest request)
+    {
+        return new RobotSceneBinding
+        {
+            Id = Guid.NewGuid(),
+            RobotId = robotId,
+            SceneType = string.IsNullOrWhiteSpace(request.SceneType)
+                ? "FairinoStudio"
+                : request.SceneType.Trim(),
+            BaseX = request.BaseX,
+            BaseY = request.BaseY,
+            BaseZ = request.BaseZ,
+            BaseYaw = request.BaseYaw,
+            UrdfPath = NormalizeNullable(request.UrdfPath),
+            PrimPath = NormalizeNullable(request.PrimPath),
+            RosNamespace = NormalizeNullable(request.RosNamespace),
+            GraphPath = NormalizeNullable(request.GraphPath),
+            CreatedAt = DateTimeOffset.UtcNow
+        };
+    }
+
+    private static void ApplySceneBinding(
+        RobotSceneBinding binding,
+        RobotSceneBindingRequest request)
+    {
+        binding.SceneType = string.IsNullOrWhiteSpace(request.SceneType)
+            ? "FairinoStudio"
+            : request.SceneType.Trim();
+        binding.BaseX = request.BaseX;
+        binding.BaseY = request.BaseY;
+        binding.BaseZ = request.BaseZ;
+        binding.BaseYaw = request.BaseYaw;
+        binding.UrdfPath = NormalizeNullable(request.UrdfPath);
+        binding.PrimPath = NormalizeNullable(request.PrimPath);
+        binding.RosNamespace = NormalizeNullable(request.RosNamespace);
+        binding.GraphPath = NormalizeNullable(request.GraphPath);
+        binding.UpdatedAt = DateTimeOffset.UtcNow;
+    }
+
+    private static RobotSceneBindingResponse ToSceneBindingResponse(
+        RobotSceneBinding binding)
+    {
+        return new RobotSceneBindingResponse
+        {
+            Id = binding.Id,
+            RobotId = binding.RobotId,
+            SceneType = binding.SceneType,
+            BaseX = binding.BaseX,
+            BaseY = binding.BaseY,
+            BaseZ = binding.BaseZ,
+            BaseYaw = binding.BaseYaw,
+            UrdfPath = binding.UrdfPath,
+            PrimPath = binding.PrimPath,
+            RosNamespace = binding.RosNamespace,
+            GraphPath = binding.GraphPath,
+            CreatedAt = binding.CreatedAt,
+            UpdatedAt = binding.UpdatedAt
+        };
+    }
+
     private static string CreateDeviceSecret()
     {
         return $"sk_robot_{RandomNumberGenerator.GetHexString(32).ToLowerInvariant()}";

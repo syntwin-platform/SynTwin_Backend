@@ -4,6 +4,8 @@ public sealed class RobotTelemetryHistoryQuery
 {
     public Guid RobotId { get; set; }
 
+    public Guid? RuntimeSessionId { get; set; }
+
     public DateTimeOffset From { get; set; }
 
     public DateTimeOffset To { get; set; }

@@ -197,6 +197,48 @@ public sealed class RobotsController : ControllerBase
         }
     }
 
+    [HttpPut("{id:guid}/scene-binding")]
+    [ProducesResponseType(typeof(RobotResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<RobotResponse>> UpdateSceneBinding(
+    Guid id,
+    RobotSceneBindingRequest request,
+    CancellationToken cancellationToken)
+    {
+        var userId = GetCurrentUserId();
+
+        if (userId is null)
+        {
+            return Unauthorized(new { message = "Invalid access token." });
+        }
+
+        try
+        {
+            var robot = await _robotService.UpdateSceneBindingAsync(
+                userId.Value,
+                id,
+                request,
+                GetClientIpAddress(),
+                cancellationToken);
+
+            return robot is null
+                ? NotFound(new { message = "Robot not found." })
+                : Ok(robot);
+        }
+        catch (InvalidOperationException exception)
+        {
+            return BadRequest(new { message = exception.Message });
+        }
+        catch (UnauthorizedAccessException exception)
+        {
+            return StatusCode(
+                StatusCodes.Status403Forbidden,
+                new { message = exception.Message });
+        }
+    }
+
     [HttpDelete("{id:guid}")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
