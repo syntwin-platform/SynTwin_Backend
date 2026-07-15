@@ -70,6 +70,53 @@ public sealed class FactoryRunContractTests
     }
 
     [Fact]
+    public void PerTargetCreateRequest_DeserializesProgramsAndAssignments()
+    {
+        const string json =
+            """
+            {
+              "companyId": "11111111-1111-1111-1111-111111111111",
+              "coordinationMode": "ParallelIndependent",
+              "failurePolicy": "IsolateTarget",
+              "programs": [
+                {
+                  "key": "pick-source",
+                  "programName": "Pick",
+                  "luaFileName": "pick.lua",
+                  "luaContent": "print('pick')"
+                },
+                {
+                  "key": "place-source",
+                  "programName": "Place",
+                  "luaFileName": "place.lua",
+                  "luaContent": "print('place')"
+                }
+              ],
+              "targets": [
+                {
+                  "robotId": "22222222-2222-2222-2222-222222222222",
+                  "programKey": "pick-source"
+                },
+                {
+                  "robotId": "33333333-3333-3333-3333-333333333333",
+                  "programKey": "place-source"
+                }
+              ]
+            }
+            """;
+
+        var request = JsonSerializer.Deserialize<CreateFactoryRunRequest>(json, JsonOptions);
+
+        Assert.NotNull(request);
+        Assert.Equal(2, request.Programs.Count);
+        Assert.Equal(2, request.Targets.Count);
+        Assert.Equal("pick-source", request.Targets[0].ProgramKey);
+        Assert.Equal("place-source", request.Targets[1].ProgramKey);
+        Assert.Empty(request.RobotIds);
+        Assert.Null(request.LuaContent);
+    }
+
+    [Fact]
     public void NewFactoryRunEntity_UsesSafeDefaults()
     {
         var factoryRun = new FactoryRun();

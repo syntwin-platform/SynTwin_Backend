@@ -41,5 +41,7 @@ public sealed class FactoryRunResponse
 
     public DateTimeOffset? UpdatedAtUtc { get; set; }
 
+    public IReadOnlyList<FactoryRunProgramResponse> Programs { get; set; } = [];
+
     public IReadOnlyList<FactoryRunTargetResponse> Targets { get; set; } = [];
 }

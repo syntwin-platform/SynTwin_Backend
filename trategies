@@ -1,0 +1,11 @@
+warning: in the working copy of 'src/Syntwin.Application/Devices/Services/DeviceGatewayService.cs', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/Syntwin.Application/FactoryRuns/Dtos/CreateFactoryRunRequest.cs', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/Syntwin.Application/FactoryRuns/Dtos/FactoryRunResponse.cs', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/Syntwin.Application/FactoryRuns/Dtos/FactoryRunTargetResponse.cs', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/Syntwin.Application/FactoryRuns/Services/FactoryRunService.cs', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/Syntwin.Domain/Entities/FactoryRun.cs', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/Syntwin.Domain/Entities/FactoryRunTarget.cs', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/Syntwin.Infrastructure/DependencyInjection.cs', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/Syntwin.Infrastructure/Persistence/Repositories/FactoryRunRepository.cs', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/Syntwin.Infrastructure/Persistence/SyntwinDbContext.cs', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'tests/Syntwin.Application.Tests/FactoryRuns/FactoryRunContractTests.cs', LF will be replaced by CRLF the next time Git touches it

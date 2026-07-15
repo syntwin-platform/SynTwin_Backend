@@ -807,7 +807,10 @@ CancellationToken cancellationToken)
                 "Factory run command does not match target command.");
         }
 
-        if (!factoryRun.ScheduledStartAtUtc.HasValue)
+        var isSynchronized =
+            factoryRun.CoordinationMode == FactoryCoordinationMode.Synchronized;
+
+        if (isSynchronized && !factoryRun.ScheduledStartAtUtc.HasValue)
         {
             throw new InvalidOperationException(
                 "Factory run has no scheduled start time.");
@@ -840,18 +843,56 @@ CancellationToken cancellationToken)
         {
             target.ActualStartedAtUtc = actualStartedAtUtc;
 
-            var lateByMs = Math.Max(
-                0,
-                (actualStartedAtUtc - factoryRun.ScheduledStartAtUtc.Value)
-                    .TotalMilliseconds);
+            if (isSynchronized)
+            {
+                var lateByMs = Math.Max(
+                    0,
+                    (actualStartedAtUtc - factoryRun.ScheduledStartAtUtc!.Value)
+                        .TotalMilliseconds);
 
-            target.StartLateByMs = (int)Math.Min(
-                int.MaxValue,
-                Math.Round(lateByMs));
+                target.StartLateByMs = (int)Math.Min(
+                    int.MaxValue,
+                    Math.Round(lateByMs));
 
-            startLateByMsMetric = target.StartLateByMs.Value;
+                startLateByMsMetric = target.StartLateByMs.Value;
+            }
+            else
+            {
+                target.StartLateByMs = null;
+            }
 
             target.UpdatedAtUtc = serverNow;
+        }
+
+        if (
+            !isSynchronized &&
+            factoryRun.Status is
+                FactoryRunStatus.Starting or
+                FactoryRunStatus.Running or
+                FactoryRunStatus.RunningDegraded)
+        {
+            target.StartedAtUtc ??= actualStartedAtUtc;
+
+            if (target.Status is
+                FactoryRunTargetStatus.Starting or
+                FactoryRunTargetStatus.Armed)
+            {
+                target.Status = FactoryRunTargetStatus.Running;
+            }
+
+            factoryRun.StartedAtUtc ??= actualStartedAtUtc;
+
+            var hasIsolatedTarget = factoryRun.Targets.Any(item =>
+                item.Status is
+                    FactoryRunTargetStatus.Failed or
+                    FactoryRunTargetStatus.Cancelled);
+
+            factoryRun.Status = hasIsolatedTarget
+                ? FactoryRunStatus.RunningDegraded
+                : FactoryRunStatus.Running;
+            factoryRun.FailureReason = hasIsolatedTarget
+                ? "One or more independent targets were isolated."
+                : null;
         }
 
         var startParticipants = factoryRun.Targets
@@ -865,7 +906,10 @@ CancellationToken cancellationToken)
 
         var shouldRecordStartSkew = !factoryRun.ActualStartSkewMs.HasValue;
 
-        if (startParticipants.Count > 0 && actualStarts.Count == startParticipants.Count)
+        if (
+            isSynchronized &&
+            startParticipants.Count > 0 &&
+            actualStarts.Count == startParticipants.Count)
         {
             var skewMs = (
                 actualStarts.Max() -
@@ -936,6 +980,12 @@ CancellationToken cancellationToken)
         if (factoryRun is null)
         {
             throw new InvalidOperationException("Factory run not found.");
+        }
+
+        if (factoryRun.CoordinationMode != FactoryCoordinationMode.Synchronized)
+        {
+            throw new InvalidOperationException(
+                "ParallelIndependent factory runs do not use the synchronized arm barrier.");
         }
 
         var target = factoryRun.Targets.FirstOrDefault(item => item.Id == request.TargetId);

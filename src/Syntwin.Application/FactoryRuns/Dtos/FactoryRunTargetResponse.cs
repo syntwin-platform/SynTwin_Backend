@@ -8,6 +8,8 @@ public sealed class FactoryRunTargetResponse
 
     public Guid RobotId { get; set; }
 
+    public Guid? FactoryRunProgramId { get; set; }
+
     public Guid? ProgramId { get; set; }
     public Guid? CommandId { get; set; }
     public Guid? PrepareCommandId { get; set; }

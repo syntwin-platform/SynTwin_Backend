@@ -18,6 +18,7 @@ using Syntwin.Application.Devices.Interfaces;
 using Syntwin.Application.Devices.Services;
 using Syntwin.Application.FactoryRuns.Interfaces;
 using Syntwin.Application.FactoryRuns.Services;
+using Syntwin.Application.FactoryRuns.Strategies;
 using Syntwin.Application.LuaParsing.Interfaces;
 using Syntwin.Application.LuaParsing.Services;
 using Syntwin.Application.Payments.Interfaces;
@@ -134,6 +135,9 @@ public static class DependencyInjection
         services.AddScoped<IRobotCommandService, RobotCommandService>();
         services.AddScoped<IFactoryRunRepository, FactoryRunRepository>();
         services.AddScoped<IFactoryRunProgramPreparationExecutor,ScopedFactoryRunProgramPreparationExecutor>();
+        services.AddScoped<IFactoryRunExecutionStrategy, ParallelIndependentFactoryRunStrategy>();
+        services.AddScoped<IFactoryRunExecutionStrategy, SynchronizedFactoryRunStrategy>();
+        services.AddScoped<FactoryRunExecutionStrategyResolver>();
         services.AddScoped<IFactoryRunService, FactoryRunService>();
         services.AddScoped<IDeviceGatewayService, DeviceGatewayService>();
         services.AddScoped<IRobotProgramRepository, RobotProgramRepository>();
