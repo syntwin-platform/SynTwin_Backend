@@ -20,20 +20,25 @@ public sealed class FactoryRunRepository : IFactoryRunRepository
         CancellationToken cancellationToken = default)
     {
         return _dbContext.FactoryRuns
-.Include(factoryRun => factoryRun.Targets)
-    .ThenInclude(target => target.PrepareCommand)
-.Include(factoryRun => factoryRun.Targets)
-    .ThenInclude(target => target.Command)
+            .Include(factoryRun => factoryRun.Programs)
+            .Include(factoryRun => factoryRun.Targets)
+                .ThenInclude(target => target.FactoryRunProgram)
+            .Include(factoryRun => factoryRun.Targets)
+                .ThenInclude(target => target.PrepareCommand)
+            .Include(factoryRun => factoryRun.Targets)
+                .ThenInclude(target => target.Command)
+            .AsSplitQuery()
             .FirstOrDefaultAsync(
                 factoryRun => factoryRun.Id == factoryRunId,
                 cancellationToken);
     }
 
     public Task<FactoryRun?> GetByIdForStartAsync(
-    Guid factoryRunId,
-    CancellationToken cancellationToken = default)
+        Guid factoryRunId,
+        CancellationToken cancellationToken = default)
     {
         return _dbContext.FactoryRuns
+            .Include(factoryRun => factoryRun.Programs)
             .Include(factoryRun => factoryRun.Targets)
                 .ThenInclude(target => target.PrepareCommand)
             .Include(factoryRun => factoryRun.Targets)
@@ -41,6 +46,8 @@ public sealed class FactoryRunRepository : IFactoryRunRepository
             .Include(factoryRun => factoryRun.Targets)
                 .ThenInclude(target => target.Program)
                     .ThenInclude(program => program!.Steps)
+            .Include(factoryRun => factoryRun.Targets)
+                .ThenInclude(target => target.FactoryRunProgram)
             .AsSplitQuery()
             .FirstOrDefaultAsync(
                 factoryRun => factoryRun.Id == factoryRunId,
@@ -48,11 +55,13 @@ public sealed class FactoryRunRepository : IFactoryRunRepository
     }
 
     public Task<FactoryRun?> GetByIdForArmAsync(
-    Guid factoryRunId,
-    CancellationToken cancellationToken = default)
+        Guid factoryRunId,
+        CancellationToken cancellationToken = default)
     {
         return _dbContext.FactoryRuns
+            .Include(factoryRun => factoryRun.Programs)
             .Include(factoryRun => factoryRun.Targets)
+            .AsSplitQuery()
             .FirstOrDefaultAsync(
                 factoryRun => factoryRun.Id == factoryRunId,
                 cancellationToken);

@@ -4,6 +4,7 @@ using Syntwin.Application.Common.Interfaces;
 using Syntwin.Application.Companies.Interfaces;
 using Syntwin.Application.FactoryRuns.Dtos;
 using Syntwin.Application.FactoryRuns.Interfaces;
+using Syntwin.Application.FactoryRuns.Strategies;
 using Syntwin.Application.LuaParsing.Dtos;
 using Syntwin.Application.LuaParsing.Interfaces;
 using Syntwin.Application.RobotPrograms.Dtos;
@@ -20,7 +21,9 @@ namespace Syntwin.Application.FactoryRuns.Services;
 
 public sealed class FactoryRunService : IFactoryRunService
 {
-    private const int MaxLuaContentLength = 1024 * 1024;
+    private const int MaxLuaContentBytes = 1024 * 1024;
+    private const int MaxTotalLuaContentBytes = 5 * 1024 * 1024;
+    private const int MaxProgramCount = 20;
     private const int MaxTargetCount = 20;
     private static readonly TimeSpan DefaultCommandTimeout = TimeSpan.FromMinutes(5);
     private readonly IFactoryRunRepository _factoryRunRepository;
@@ -34,6 +37,7 @@ public sealed class FactoryRunService : IFactoryRunService
     private readonly IRobotCommandTimeoutScheduler _commandTimeoutScheduler;
     private readonly IRobotBusyLock _robotBusyLock;
     private readonly IRobotRuntimeMetrics _metrics;
+    private readonly FactoryRunExecutionStrategyResolver _executionStrategyResolver;
     private readonly TimeSpan _factoryRunBusyLockTtl;
 
 
@@ -49,6 +53,7 @@ public sealed class FactoryRunService : IFactoryRunService
         IRobotCommandTimeoutScheduler commandTimeoutScheduler,
         IRobotBusyLock robotBusyLock,
         IRobotRuntimeMetrics metrics,
+        FactoryRunExecutionStrategyResolver executionStrategyResolver,
         IOptions<RobotRuntimeOptions> runtimeOptions)
     {
         _factoryRunRepository = factoryRunRepository;
@@ -62,6 +67,7 @@ public sealed class FactoryRunService : IFactoryRunService
         _commandTimeoutScheduler = commandTimeoutScheduler;
         _robotBusyLock = robotBusyLock;
         _metrics = metrics;
+        _executionStrategyResolver = executionStrategyResolver;
         _factoryRunBusyLockTtl = TimeSpan.FromSeconds(Math.Max(
             60,
             runtimeOptions.Value.FactoryRunBusyLockTtlSeconds));
@@ -73,7 +79,7 @@ public sealed class FactoryRunService : IFactoryRunService
         string? ipAddress,
         CancellationToken cancellationToken = default)
     {
-        ValidateCreateRequest(request);
+        var normalizedRequest = NormalizeCreateRequest(request);
 
         var company = await _companyRepository.GetByIdAsync(request.CompanyId, cancellationToken);
         if (company is null || company.Status != CompanyStatus.Active)
@@ -86,8 +92,8 @@ public sealed class FactoryRunService : IFactoryRunService
             return null;
         }
 
-        var robotIds = request.RobotIds
-            .Distinct()
+        var robotIds = normalizedRequest.Targets
+            .Select(target => target.RobotId)
             .ToArray();
 
         var robots = await _robotRepository.ListByIdsAsync(robotIds, cancellationToken);
@@ -112,29 +118,70 @@ public sealed class FactoryRunService : IFactoryRunService
         }
 
         var now = DateTimeOffset.UtcNow;
+        var factoryRunId = Guid.NewGuid();
+        var programByHash = new Dictionary<string, FactoryRunProgram>(
+            StringComparer.OrdinalIgnoreCase);
+        var programByKey = new Dictionary<string, FactoryRunProgram>(
+            StringComparer.OrdinalIgnoreCase);
+
+        foreach (var programRequest in normalizedRequest.Programs)
+        {
+            var contentHash = ComputeSha256(programRequest.LuaContent);
+
+            if (!programByHash.TryGetValue(contentHash, out var sourceProgram))
+            {
+                sourceProgram = new FactoryRunProgram
+                {
+                    Id = Guid.NewGuid(),
+                    FactoryRunId = factoryRunId,
+                    ProgramKey = programRequest.Key,
+                    ProgramName = programRequest.ProgramName,
+                    LuaFileName = programRequest.LuaFileName,
+                    LuaContent = programRequest.LuaContent,
+                    LuaContentHash = contentHash,
+                    CreatedAtUtc = now
+                };
+
+                programByHash.Add(contentHash, sourceProgram);
+            }
+
+            programByKey.Add(programRequest.Key, sourceProgram);
+        }
+
+        var primaryProgram = programByKey[normalizedRequest.Programs[0].Key];
         var factoryRun = new FactoryRun
         {
-            Id = Guid.NewGuid(),
+            Id = factoryRunId,
             CompanyId = request.CompanyId,
             CreatedByUserId = userId,
             Status = FactoryRunStatus.Created,
             CoordinationMode = request.CoordinationMode,
             FailurePolicy = request.FailurePolicy,
-            ProgramName = request.ProgramName.Trim(),
-            LuaFileName = request.LuaFileName.Trim(),
-            LuaContent = request.LuaContent,
-            LuaContentHash = ComputeSha256(request.LuaContent),
+            // Legacy projection retained during the compatibility window.
+            ProgramName = primaryProgram.ProgramName,
+            LuaFileName = primaryProgram.LuaFileName,
+            LuaContent = primaryProgram.LuaContent,
+            LuaContentHash = primaryProgram.LuaContentHash,
             TargetCount = robotIds.Length,
             CreatedAtUtc = now,
             UpdatedAtUtc = now,
-            Targets = robotIds
-                .Select(robotId => new FactoryRunTarget
+            Programs = programByHash.Values.ToList(),
+            Targets = normalizedRequest.Targets
+                .Select(targetRequest =>
                 {
-                    Id = Guid.NewGuid(),
-                    RobotId = robotId,
-                    Status = FactoryRunTargetStatus.Pending,
-                    CreatedAtUtc = now,
-                    UpdatedAtUtc = now
+                    var sourceProgram = programByKey[targetRequest.ProgramKey];
+
+                    return new FactoryRunTarget
+                    {
+                        Id = Guid.NewGuid(),
+                        FactoryRunId = factoryRunId,
+                        RobotId = targetRequest.RobotId,
+                        FactoryRunProgramId = sourceProgram.Id,
+                        FactoryRunProgram = sourceProgram,
+                        Status = FactoryRunTargetStatus.Pending,
+                        CreatedAtUtc = now,
+                        UpdatedAtUtc = now
+                    };
                 })
                 .ToList()
         };
@@ -245,46 +292,65 @@ public sealed class FactoryRunService : IFactoryRunService
                     "No robot target was available for FactoryRun preparation.");
             }
 
-            var importRequest = new LuaParseRequest
-            {
-                FileName = factoryRun.LuaFileName,
-                LuaContent = factoryRun.LuaContent
-            };
-
-            var previewRobotId = activeTargets
-                .First()
-                .RobotId;
-
-            var importPreview = await _luaProgramImportService.PreviewAsync(
-                userId,
-                previewRobotId,
-                importRequest,
-                cancellationToken);
-
-            if (importPreview is null)
-            {
-                throw new InvalidOperationException("Robot not found or access denied.");
-            }
-
-            if (importPreview.CreateProgramRequest is null)
-            {
-                var firstError = importPreview.Diagnostics
-                    .FirstOrDefault(diagnostic => diagnostic.Severity == "error");
-
-                throw new InvalidOperationException(
-                    firstError?.Message ?? "The LUA file does not contain any valid robot program steps.");
-            }
-
             var orderedTargets = activeTargets;
+            var preparationItems = new List<FactoryRunProgramPreparationItem>(
+                orderedTargets.Count);
+            var preflightFailures = new Dictionary<Guid, string>();
 
-            var preparationItems = orderedTargets
-                .Select(target => new FactoryRunProgramPreparationItem
+            // Parse once per deduplicated source Lua, then clone the resulting
+            // program request for every target assigned to that source.
+            foreach (var sourceGroup in orderedTargets.GroupBy(target =>
+                target.FactoryRunProgramId ?? Guid.Empty))
+            {
+                var representativeTarget = sourceGroup.First();
+                var sourceProgram = representativeTarget.FactoryRunProgram;
+                var importRequest = new LuaParseRequest
                 {
-                    RobotId = target.RobotId,
-                    CreateProgramRequest = CloneCreateProgramRequest(
-                        importPreview.CreateProgramRequest)
-                })
-                .ToList();
+                    FileName = sourceProgram?.LuaFileName ?? factoryRun.LuaFileName,
+                    LuaContent = sourceProgram?.LuaContent ?? factoryRun.LuaContent
+                };
+
+                var importPreview = await _luaProgramImportService.PreviewAsync(
+                    userId,
+                    representativeTarget.RobotId,
+                    importRequest,
+                    cancellationToken);
+
+                var previewError = importPreview is null
+                    ? "Robot not found or access denied."
+                    : importPreview.CreateProgramRequest is null
+                        ? importPreview.Diagnostics
+                            .FirstOrDefault(diagnostic => diagnostic.Severity == "error")
+                            ?.Message ??
+                            "The LUA file does not contain any valid robot program steps."
+                        : null;
+
+                if (previewError is not null)
+                {
+                    foreach (var target in sourceGroup)
+                    {
+                        preflightFailures[target.RobotId] = previewError;
+                    }
+
+                    if (factoryRun.FailurePolicy ==
+                        FactoryFailurePolicy.AbortExecutionGroup)
+                    {
+                        throw new InvalidOperationException(previewError);
+                    }
+
+                    continue;
+                }
+
+                foreach (var target in sourceGroup)
+                {
+                    preparationItems.Add(new FactoryRunProgramPreparationItem
+                    {
+                        RobotId = target.RobotId,
+                        CreateProgramRequest = CloneCreateProgramRequest(
+                            importPreview!.CreateProgramRequest!)
+                    });
+                }
+            }
 
             var preparationResults =
                 await _programPreparationExecutor.CreateAndPublishManyAsync(
@@ -296,6 +362,17 @@ public sealed class FactoryRunService : IFactoryRunService
 
             var preparationResultsByRobotId = preparationResults
                 .ToDictionary(result => result.RobotId);
+
+            foreach (var preflightFailure in preflightFailures)
+            {
+                preparationResultsByRobotId.Add(
+                    preflightFailure.Key,
+                    new FactoryRunPreparedProgram
+                    {
+                        RobotId = preflightFailure.Key,
+                        Error = preflightFailure.Value
+                    });
+            }
 
             var preparedPrograms =
                 new List<(FactoryRunTarget Target, RobotProgramResponse Program)>(
@@ -524,11 +601,9 @@ public sealed class FactoryRunService : IFactoryRunService
             throw new InvalidOperationException("Factory run can only start after all devices report Ready.");
         }
 
-        var participatingTargets = factoryRun.FailurePolicy == FactoryFailurePolicy.IsolateTarget
-            ? factoryRun.Targets
-                .Where(target => target.Status == FactoryRunTargetStatus.Ready)
-                .ToList()
-            : factoryRun.Targets.ToList();
+        var executionStrategy = _executionStrategyResolver.Resolve(
+            factoryRun.CoordinationMode);
+        var participatingTargets = executionStrategy.SelectStartTargets(factoryRun);
         var notReadyTarget = participatingTargets.FirstOrDefault(target =>
             target.Status != FactoryRunTargetStatus.Ready);
 
@@ -568,6 +643,7 @@ public sealed class FactoryRunService : IFactoryRunService
                     PayloadJson: BuildFactoryRunSnapshotPayload(
                         target,
                         factoryRun.Id,
+                        executionStrategy.Mode,
                         factoryRun.FailurePolicy,
                         scheduledStartAtUtc: null));
             })
@@ -669,10 +745,29 @@ public sealed class FactoryRunService : IFactoryRunService
 
             await _factoryRunRepository.SaveChangesAsync(cancellationToken);
 
-            await Task.WhenAll(commandsToDispatch.Select(command =>
-                _commandTimeoutScheduler.ScheduleAsync(command, cancellationToken)));
+            if (
+                executionStrategy.Mode == FactoryCoordinationMode.ParallelIndependent &&
+                factoryRun.FailurePolicy == FactoryFailurePolicy.IsolateTarget)
+            {
+                var dispatchedCount = await DispatchIndependentCommandsAsync(
+                    factoryRun,
+                    commandsToDispatch,
+                    cancellationToken);
 
-            await _commandQueue.EnqueueManyAsync(commandsToDispatch, cancellationToken);
+                if (dispatchedCount == 0)
+                {
+                    throw new InvalidOperationException(
+                        "No independent FactoryRun command could be dispatched.");
+                }
+            }
+            else
+            {
+                await Task.WhenAll(commandsToDispatch.Select(command =>
+                    _commandTimeoutScheduler.ScheduleAsync(command, cancellationToken)));
+
+                await _commandQueue.EnqueueManyAsync(commandsToDispatch, cancellationToken);
+            }
+
             return ToResponse(factoryRun);
         }
         catch (Exception exception)
@@ -930,7 +1025,8 @@ public sealed class FactoryRunService : IFactoryRunService
         return role.HasValue;
     }
 
-    private static void ValidateCreateRequest(CreateFactoryRunRequest request)
+    private static NormalizedFactoryRunCreateRequest NormalizeCreateRequest(
+        CreateFactoryRunRequest request)
     {
         if (request.CompanyId == Guid.Empty)
         {
@@ -948,50 +1044,208 @@ public sealed class FactoryRunService : IFactoryRunService
                 $"Unsupported FactoryRun failure policy: {request.FailurePolicy}.");
         }
 
-        if (string.IsNullOrWhiteSpace(request.ProgramName))
+        var requestedPrograms = request.Programs ?? [];
+        var requestedTargets = request.Targets ?? [];
+        var usesPerTargetContract =
+            requestedPrograms.Count > 0 || requestedTargets.Count > 0;
+
+        List<NormalizedFactoryRunProgramRequest> programs;
+        List<NormalizedFactoryRunTargetRequest> targets;
+
+        if (usesPerTargetContract)
         {
-            throw new InvalidOperationException("ProgramName is required.");
+            if (requestedPrograms.Count == 0 || requestedTargets.Count == 0)
+            {
+                throw new InvalidOperationException(
+                    "Programs and Targets must both be provided for per-target FactoryRun requests.");
+            }
+
+            if (requestedPrograms.Any(program => program is null))
+            {
+                throw new InvalidOperationException(
+                    "FactoryRun programs must not contain null entries.");
+            }
+
+            if (requestedTargets.Any(target => target is null))
+            {
+                throw new InvalidOperationException(
+                    "FactoryRun targets must not contain null entries.");
+            }
+
+            programs = requestedPrograms
+                .Select(program => NormalizeProgramRequest(
+                    program.Key,
+                    program.ProgramName,
+                    program.LuaFileName,
+                    program.LuaContent))
+                .ToList();
+
+            targets = requestedTargets
+                .Select(target => new NormalizedFactoryRunTargetRequest(
+                    target.RobotId,
+                    target.ProgramKey?.Trim() ?? string.Empty))
+                .ToList();
+        }
+        else
+        {
+            var legacyProgram = NormalizeProgramRequest(
+                "legacy-program",
+                request.ProgramName,
+                request.LuaFileName,
+                request.LuaContent);
+
+            programs = [legacyProgram];
+            targets = (request.RobotIds ?? [])
+                .Where(robotId => robotId != Guid.Empty)
+                .Distinct()
+                .Select(robotId => new NormalizedFactoryRunTargetRequest(
+                    robotId,
+                    legacyProgram.Key))
+                .ToList();
         }
 
-        if (request.ProgramName.Trim().Length > 100)
+        if (programs.Count > MaxProgramCount)
         {
-            throw new InvalidOperationException("ProgramName must not exceed 100 characters.");
+            throw new InvalidOperationException(
+                $"FactoryRun supports at most {MaxProgramCount} source programs.");
         }
 
-        if (string.IsNullOrWhiteSpace(request.LuaFileName))
+        var duplicateProgramKey = programs
+            .GroupBy(program => program.Key, StringComparer.OrdinalIgnoreCase)
+            .FirstOrDefault(group => group.Count() > 1);
+
+        if (duplicateProgramKey is not null)
         {
-            throw new InvalidOperationException("LuaFileName is required.");
+            throw new InvalidOperationException(
+                $"Duplicate FactoryRun program key: {duplicateProgramKey.Key}.");
         }
 
-        if (!request.LuaFileName.EndsWith(".lua", StringComparison.OrdinalIgnoreCase))
+        var totalLuaBytes = programs.Sum(program =>
+            (long)Encoding.UTF8.GetByteCount(program.LuaContent));
+
+        if (totalLuaBytes > MaxTotalLuaContentBytes)
         {
-            throw new InvalidOperationException("Only .lua files are supported.");
+            throw new InvalidOperationException(
+                "Total LuaContent payload must not exceed 5 MB.");
         }
 
-        if (string.IsNullOrWhiteSpace(request.LuaContent))
-        {
-            throw new InvalidOperationException("LuaContent is required.");
-        }
-
-        if (request.LuaContent.Length > MaxLuaContentLength)
-        {
-            throw new InvalidOperationException("LuaContent must not exceed 1 MB.");
-        }
-
-        var robotIds = request.RobotIds
-            .Where(robotId => robotId != Guid.Empty)
-            .Distinct()
-            .ToArray();
-
-        if (robotIds.Length == 0)
+        if (targets.Count == 0)
         {
             throw new InvalidOperationException("At least one robot target is required.");
         }
 
-        if (robotIds.Length > MaxTargetCount)
+        if (targets.Count > MaxTargetCount)
         {
-            throw new InvalidOperationException($"FactoryRun supports at most {MaxTargetCount} robot targets.");
+            throw new InvalidOperationException(
+                $"FactoryRun supports at most {MaxTargetCount} robot targets.");
         }
+
+        if (targets.Any(target => target.RobotId == Guid.Empty))
+        {
+            throw new InvalidOperationException("Every FactoryRun target requires RobotId.");
+        }
+
+        var duplicateRobot = targets
+            .GroupBy(target => target.RobotId)
+            .FirstOrDefault(group => group.Count() > 1);
+
+        if (duplicateRobot is not null)
+        {
+            throw new InvalidOperationException(
+                $"Robot {duplicateRobot.Key} appears more than once in FactoryRun targets.");
+        }
+
+        var programKeys = programs
+            .Select(program => program.Key)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var missingProgramTarget = targets.FirstOrDefault(target =>
+            string.IsNullOrWhiteSpace(target.ProgramKey) ||
+            !programKeys.Contains(target.ProgramKey));
+
+        if (missingProgramTarget is not null)
+        {
+            throw new InvalidOperationException(
+                $"FactoryRun target {missingProgramTarget.RobotId} references unknown " +
+                $"program key '{missingProgramTarget.ProgramKey}'.");
+        }
+
+        if (
+            request.CoordinationMode == FactoryCoordinationMode.Synchronized &&
+            targets
+                .Select(target => programs.Single(program =>
+                    string.Equals(
+                        program.Key,
+                        target.ProgramKey,
+                        StringComparison.OrdinalIgnoreCase)))
+                .Select(program => ComputeSha256(program.LuaContent))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .Skip(1)
+                .Any())
+        {
+            throw new InvalidOperationException(
+                "Synchronized mode currently requires all targets to use the same Lua content. " +
+                "Use ParallelIndependent for different Lua programs.");
+        }
+
+        return new NormalizedFactoryRunCreateRequest(programs, targets);
+    }
+
+    private static NormalizedFactoryRunProgramRequest NormalizeProgramRequest(
+        string? key,
+        string? programName,
+        string? luaFileName,
+        string? luaContent)
+    {
+        var normalizedKey = key?.Trim() ?? string.Empty;
+        var normalizedProgramName = programName?.Trim() ?? string.Empty;
+        var normalizedLuaFileName = luaFileName?.Trim() ?? string.Empty;
+
+        if (string.IsNullOrWhiteSpace(normalizedKey) || normalizedKey.Length > 100)
+        {
+            throw new InvalidOperationException(
+                "Every FactoryRun program requires a key of at most 100 characters.");
+        }
+
+        if (string.IsNullOrWhiteSpace(normalizedProgramName))
+        {
+            throw new InvalidOperationException("ProgramName is required.");
+        }
+
+        if (normalizedProgramName.Length > 100)
+        {
+            throw new InvalidOperationException(
+                "ProgramName must not exceed 100 characters.");
+        }
+
+        if (
+            string.IsNullOrWhiteSpace(normalizedLuaFileName) ||
+            !normalizedLuaFileName.EndsWith(".lua", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException(
+                "Every FactoryRun program requires a .lua file name.");
+        }
+
+        if (normalizedLuaFileName.Length > 260)
+        {
+            throw new InvalidOperationException(
+                "LuaFileName must not exceed 260 characters.");
+        }
+
+        if (string.IsNullOrWhiteSpace(luaContent))
+        {
+            throw new InvalidOperationException("LuaContent is required.");
+        }
+
+        if (Encoding.UTF8.GetByteCount(luaContent) > MaxLuaContentBytes)
+        {
+            throw new InvalidOperationException("LuaContent must not exceed 1 MB.");
+        }
+
+        return new NormalizedFactoryRunProgramRequest(
+            normalizedKey,
+            normalizedProgramName,
+            normalizedLuaFileName,
+            luaContent);
     }
 
     private async Task<bool> RefreshFromCommandsAsync(
@@ -1269,9 +1523,98 @@ public sealed class FactoryRunService : IFactoryRunService
         };
     }
 
+    private async Task<int> DispatchIndependentCommandsAsync(
+        FactoryRun factoryRun,
+        IReadOnlyCollection<RobotCommand> commands,
+        CancellationToken cancellationToken)
+    {
+        var dispatchedCount = 0;
+        var failedDispatches = new List<(RobotCommand Command, FactoryRunTarget Target)>();
+
+        foreach (var command in commands)
+        {
+            var target = factoryRun.Targets.First(item => item.CommandId == command.Id);
+            var timeoutScheduled = false;
+
+            try
+            {
+                await _commandTimeoutScheduler.ScheduleAsync(
+                    command,
+                    cancellationToken);
+                timeoutScheduled = true;
+
+                await _commandQueue.EnqueueAsync(command, cancellationToken);
+                dispatchedCount++;
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception exception)
+            {
+                var failedAt = DateTimeOffset.UtcNow;
+                var failureReason =
+                    $"Independent command dispatch failed: {exception.Message}";
+
+                command.Status = CommandStatus.Failed;
+                command.CompletedAt = failedAt;
+                command.TimeoutAt = null;
+                command.FailureReason = failureReason;
+
+                target.Status = FactoryRunTargetStatus.Failed;
+                target.TerminationReason =
+                    FactoryRunTargetTerminationReason.CommandFailure;
+                target.CompletedAtUtc = failedAt;
+                target.FailureReason = failureReason;
+                target.UpdatedAtUtc = failedAt;
+
+                failedDispatches.Add((command, target));
+
+                if (timeoutScheduled)
+                {
+                    try
+                    {
+                        await _commandTimeoutScheduler.RemoveAsync(
+                            command.Id,
+                            CancellationToken.None);
+                    }
+                    catch
+                    {
+                        // The command is terminal in SQL. The timeout worker can
+                        // safely discard a stale Redis entry if cleanup is delayed.
+                    }
+                }
+            }
+        }
+
+        if (failedDispatches.Count == 0)
+        {
+            return dispatchedCount;
+        }
+
+        factoryRun.FailureReason =
+            $"Factory run started with {dispatchedCount}/{commands.Count} " +
+            "independent commands dispatched.";
+        factoryRun.UpdatedAtUtc = DateTimeOffset.UtcNow;
+
+        // Persist terminal targets before releasing their owner-aware locks.
+        await _factoryRunRepository.SaveChangesAsync(cancellationToken);
+
+        foreach (var failedDispatch in failedDispatches)
+        {
+            await _robotBusyLock.ReleaseAsync(
+                failedDispatch.Target.RobotId,
+                failedDispatch.Command.Id,
+                CancellationToken.None);
+        }
+
+        return dispatchedCount;
+    }
+
     private static string BuildFactoryRunSnapshotPayload(
         FactoryRunTarget target,
         Guid factoryRunId,
+        FactoryCoordinationMode coordinationMode,
         FactoryFailurePolicy failurePolicy,
         DateTimeOffset? scheduledStartAtUtc)
     {
@@ -1300,7 +1643,10 @@ public sealed class FactoryRunService : IFactoryRunService
             programId = program.Id,
             factoryRunId,
             targetId = target.Id,
-            syncMode = "Barrier",
+            coordinationMode = coordinationMode.ToString(),
+            syncMode = coordinationMode == FactoryCoordinationMode.Synchronized
+                ? "Barrier"
+                : "Independent",
             failurePolicy = failurePolicy.ToString(),
             programName = program.Name,
             programStatus = program.Status.ToString(),
@@ -1397,6 +1743,19 @@ public sealed class FactoryRunService : IFactoryRunService
             FailureReason = factoryRun.FailureReason,
             CreatedAtUtc = factoryRun.CreatedAtUtc,
             UpdatedAtUtc = factoryRun.UpdatedAtUtc,
+            Programs = factoryRun.Programs
+                .OrderBy(program => program.CreatedAtUtc)
+                .Select(program => new FactoryRunProgramResponse
+                {
+                    Id = program.Id,
+                    FactoryRunId = factoryRun.Id,
+                    ProgramKey = program.ProgramKey,
+                    ProgramName = program.ProgramName,
+                    LuaFileName = program.LuaFileName,
+                    LuaContentHash = program.LuaContentHash,
+                    SyncPlanHash = program.SyncPlanHash
+                })
+                .ToList(),
             Targets = factoryRun.Targets
                 .OrderBy(target => target.CreatedAtUtc)
                 .Select(ToTargetResponse)
@@ -1411,6 +1770,7 @@ public sealed class FactoryRunService : IFactoryRunService
             Id = target.Id,
             FactoryRunId = target.FactoryRunId,
             RobotId = target.RobotId,
+            FactoryRunProgramId = target.FactoryRunProgramId,
             ProgramId = target.ProgramId,
             PrepareCommandId = target.PrepareCommandId,
             CommandId = target.CommandId,
@@ -1432,4 +1792,18 @@ public sealed class FactoryRunService : IFactoryRunService
             FailureReason = target.FailureReason
         };
     }
+
+    private sealed record NormalizedFactoryRunCreateRequest(
+        IReadOnlyList<NormalizedFactoryRunProgramRequest> Programs,
+        IReadOnlyList<NormalizedFactoryRunTargetRequest> Targets);
+
+    private sealed record NormalizedFactoryRunProgramRequest(
+        string Key,
+        string ProgramName,
+        string LuaFileName,
+        string LuaContent);
+
+    private sealed record NormalizedFactoryRunTargetRequest(
+        Guid RobotId,
+        string ProgramKey);
 }

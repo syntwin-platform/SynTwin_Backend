@@ -28,6 +28,7 @@ public sealed class SyntwinDbContext : DbContext
     public DbSet<RobotProgram> RobotPrograms => Set<RobotProgram>();
     public DbSet<RobotProgramStep> RobotProgramSteps => Set<RobotProgramStep>();
     public DbSet<FactoryRun> FactoryRuns => Set<FactoryRun>();
+    public DbSet<FactoryRunProgram> FactoryRunPrograms => Set<FactoryRunProgram>();
     public DbSet<FactoryRunTarget> FactoryRunTargets => Set<FactoryRunTarget>();
     public DbSet<Company> Companies => Set<Company>();
     public DbSet<CompanyMember> CompanyMembers => Set<CompanyMember>();
@@ -52,6 +53,7 @@ public sealed class SyntwinDbContext : DbContext
         ConfigureRobotPrograms(modelBuilder);
         ConfigureRobotProgramSteps(modelBuilder);
         ConfigureFactoryRuns(modelBuilder);
+        ConfigureFactoryRunPrograms(modelBuilder);
         ConfigureFactoryRunTargets(modelBuilder);
         ConfigureAuditLogs(modelBuilder);
         ConfigureCompanies(modelBuilder);
@@ -1018,6 +1020,9 @@ public sealed class SyntwinDbContext : DbContext
             entity.HasIndex(target => target.RobotId)
                 .HasDatabaseName("IX_factory_run_targets_robot_id");
 
+            entity.HasIndex(target => target.FactoryRunProgramId)
+                .HasDatabaseName("IX_factory_run_targets_factory_run_program_id");
+
             entity.HasIndex(target => target.ProgramId)
                 .HasDatabaseName("IX_factory_run_targets_program_id");
 
@@ -1041,6 +1046,11 @@ public sealed class SyntwinDbContext : DbContext
                 .HasForeignKey(target => target.RobotId)
                 .OnDelete(DeleteBehavior.Restrict);
 
+            entity.HasOne(target => target.FactoryRunProgram)
+                .WithMany(program => program.Targets)
+                .HasForeignKey(target => target.FactoryRunProgramId)
+                .OnDelete(DeleteBehavior.Restrict);
+
             entity.HasOne(target => target.Program)
                 .WithMany()
                 .HasForeignKey(target => target.ProgramId)
@@ -1055,6 +1065,55 @@ public sealed class SyntwinDbContext : DbContext
                 .WithMany()
                 .HasForeignKey(target => target.CommandId)
                 .OnDelete(DeleteBehavior.Restrict);
+        });
+    }
+
+    private static void ConfigureFactoryRunPrograms(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<FactoryRunProgram>(entity =>
+        {
+            entity.ToTable("factory_run_programs");
+
+            entity.HasKey(program => program.Id);
+
+            entity.Property(program => program.ProgramKey)
+                .IsRequired()
+                .HasMaxLength(100);
+
+            entity.Property(program => program.ProgramName)
+                .IsRequired()
+                .HasMaxLength(100);
+
+            entity.Property(program => program.LuaFileName)
+                .IsRequired()
+                .HasMaxLength(260);
+
+            entity.Property(program => program.LuaContent)
+                .IsRequired()
+                .HasColumnType("nvarchar(max)");
+
+            entity.Property(program => program.LuaContentHash)
+                .IsRequired()
+                .HasMaxLength(64);
+
+            entity.Property(program => program.SyncPlanHash)
+                .HasMaxLength(64);
+
+            entity.Property(program => program.CreatedAtUtc)
+                .IsRequired();
+
+            entity.HasIndex(program => new { program.FactoryRunId, program.ProgramKey })
+                .IsUnique()
+                .HasDatabaseName("UX_factory_run_programs_run_key");
+
+            entity.HasIndex(program => new { program.FactoryRunId, program.LuaContentHash })
+                .IsUnique()
+                .HasDatabaseName("UX_factory_run_programs_run_content_hash");
+
+            entity.HasOne(program => program.FactoryRun)
+                .WithMany(factoryRun => factoryRun.Programs)
+                .HasForeignKey(program => program.FactoryRunId)
+                .OnDelete(DeleteBehavior.Cascade);
         });
     }
 

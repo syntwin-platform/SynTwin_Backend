@@ -9,23 +9,22 @@ public sealed class CreateFactoryRunRequest
     public Guid CompanyId { get; set; }
 
     public FactoryCoordinationMode CoordinationMode { get; set; } =
-    FactoryCoordinationMode.Synchronized;
+        FactoryCoordinationMode.Synchronized;
 
-public FactoryFailurePolicy FailurePolicy { get; set; } =
-    FactoryFailurePolicy.IsolateTarget;
+    public FactoryFailurePolicy FailurePolicy { get; set; } =
+        FactoryFailurePolicy.IsolateTarget;
 
-    [Required]
     [MaxLength(100)]
-    public string ProgramName { get; set; } = string.Empty;
+    public string? ProgramName { get; set; }
 
-    [Required]
     [MaxLength(260)]
-    public string LuaFileName { get; set; } = string.Empty;
+    public string? LuaFileName { get; set; }
 
-    [Required]
-    public string LuaContent { get; set; } = string.Empty;
+    public string? LuaContent { get; set; }
 
-    [Required]
-    [MinLength(1)]
     public List<Guid> RobotIds { get; set; } = new();
+
+    public List<CreateFactoryRunProgramRequest> Programs { get; set; } = new();
+
+    public List<CreateFactoryRunTargetRequest> Targets { get; set; } = new();
 }

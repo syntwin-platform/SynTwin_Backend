@@ -10,6 +10,10 @@ public sealed class FactoryRunTarget
 
     public Guid RobotId { get; set; }
 
+    // Nullable only for FactoryRun rows created before the per-target program
+    // migration. Every new run created by the current API assigns this value.
+    public Guid? FactoryRunProgramId { get; set; }
+
     public Guid? ProgramId { get; set; }
     public Guid? PrepareCommandId { get; set; }
     public Guid? CommandId { get; set; }
@@ -50,6 +54,8 @@ public sealed class FactoryRunTarget
     public FactoryRun? FactoryRun { get; set; }
 
     public Robot? Robot { get; set; }
+
+    public FactoryRunProgram? FactoryRunProgram { get; set; }
 
     public RobotProgram? Program { get; set; }
 

@@ -13,10 +13,10 @@ public sealed class FactoryRun
     public FactoryRunStatus Status { get; set; } = FactoryRunStatus.Created;
 
     public FactoryCoordinationMode CoordinationMode { get; set; } =
-    FactoryCoordinationMode.Synchronized;
+        FactoryCoordinationMode.Synchronized;
 
     public FactoryFailurePolicy FailurePolicy { get; set; } =
-    FactoryFailurePolicy.IsolateTarget;
+        FactoryFailurePolicy.IsolateTarget;
 
     public string ProgramName { get; set; } = string.Empty;
 
@@ -51,6 +51,9 @@ public sealed class FactoryRun
     public Company? Company { get; set; }
 
     public User? CreatedByUser { get; set; }
+
+    public ICollection<FactoryRunProgram> Programs { get; set; } =
+        new List<FactoryRunProgram>();
 
     public ICollection<FactoryRunTarget> Targets { get; set; } = new List<FactoryRunTarget>();
 }
