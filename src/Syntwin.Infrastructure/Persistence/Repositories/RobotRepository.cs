@@ -22,7 +22,7 @@ public sealed class RobotRepository : IRobotRepository
         var query = _dbContext.Robots
             .AsNoTracking()
             .Include(robot => robot.SceneBinding)
-            .Where(robot =>_dbContext.CompanyMembers.Any(member =>
+            .Where(robot => _dbContext.CompanyMembers.Any(member =>
             member.CompanyId == robot.CompanyId &&
             member.UserId == userId &&
             member.IsActive &&

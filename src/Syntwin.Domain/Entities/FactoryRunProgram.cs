@@ -16,6 +16,10 @@ public sealed class FactoryRunProgram
 
     public string LuaContentHash { get; set; } = string.Empty;
 
+    public string? CompiledProgramJson { get; set; }
+
+    public string? CompiledProgramHash { get; set; }
+
     public string? SyncPlanHash { get; set; }
 
     public DateTimeOffset CreatedAtUtc { get; set; } = DateTimeOffset.UtcNow;

@@ -3,6 +3,7 @@ using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Syntwin.Infrastructure.Persistence;
 
@@ -11,9 +12,11 @@ using Syntwin.Infrastructure.Persistence;
 namespace Syntwin.Infrastructure.Persistence.Migrations
 {
     [DbContext(typeof(SyntwinDbContext))]
-    partial class SyntwinDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260717161937_AddFactoryRunCompiledProgramSnapshot")]
+    partial class AddFactoryRunCompiledProgramSnapshot
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -276,9 +279,6 @@ namespace Syntwin.Infrastructure.Persistence.Migrations
                     b.Property<DateTimeOffset?>("CancelledAtUtc")
                         .HasColumnType("datetimeoffset");
 
-                    b.Property<Guid?>("ClientRequestId")
-                        .HasColumnType("uniqueidentifier");
-
                     b.Property<Guid>("CompanyId")
                         .HasColumnType("uniqueidentifier");
 
@@ -331,10 +331,6 @@ namespace Syntwin.Infrastructure.Persistence.Migrations
                         .HasMaxLength(100)
                         .HasColumnType("nvarchar(100)");
 
-                    b.Property<string>("RequestHash")
-                        .HasMaxLength(64)
-                        .HasColumnType("nvarchar(64)");
-
                     b.Property<DateTimeOffset?>("ScheduledStartAtUtc")
                         .HasColumnType("datetimeoffset");
 
@@ -362,11 +358,6 @@ namespace Syntwin.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("CreatedByUserId")
                         .HasDatabaseName("IX_factory_runs_created_by_user_id");
-
-                    b.HasIndex("CreatedByUserId", "ClientRequestId")
-                        .IsUnique()
-                        .HasDatabaseName("UX_factory_runs_user_client_request")
-                        .HasFilter("[ClientRequestId] IS NOT NULL");
 
                     b.HasIndex("CompanyId", "Status", "CreatedAtUtc")
                         .HasDatabaseName("IX_factory_runs_company_status_created_at");
@@ -446,9 +437,6 @@ namespace Syntwin.Infrastructure.Persistence.Migrations
                     b.Property<DateTimeOffset?>("ArmedAtUtc")
                         .HasColumnType("datetimeoffset");
 
-                    b.Property<Guid?>("CancelCommandId")
-                        .HasColumnType("uniqueidentifier");
-
                     b.Property<Guid?>("CommandId")
                         .HasColumnType("uniqueidentifier");
 
@@ -519,15 +507,8 @@ namespace Syntwin.Infrastructure.Persistence.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("CancelCommandId")
-                        .IsUnique()
-                        .HasDatabaseName("UX_factory_run_targets_cancel_command_id")
-                        .HasFilter("[CancelCommandId] IS NOT NULL");
-
                     b.HasIndex("CommandId")
-                        .IsUnique()
-                        .HasDatabaseName("UX_factory_run_targets_command_id")
-                        .HasFilter("[CommandId] IS NOT NULL");
+                        .HasDatabaseName("IX_factory_run_targets_command_id");
 
                     b.HasIndex("FactoryRunId")
                         .HasDatabaseName("IX_factory_run_targets_factory_run_id");
@@ -536,9 +517,7 @@ namespace Syntwin.Infrastructure.Persistence.Migrations
                         .HasDatabaseName("IX_factory_run_targets_factory_run_program_id");
 
                     b.HasIndex("PrepareCommandId")
-                        .IsUnique()
-                        .HasDatabaseName("UX_factory_run_targets_prepare_command_id")
-                        .HasFilter("[PrepareCommandId] IS NOT NULL");
+                        .HasDatabaseName("IX_factory_run_targets_prepare_command_id");
 
                     b.HasIndex("ProgramId")
                         .HasDatabaseName("IX_factory_run_targets_program_id");
@@ -1535,11 +1514,6 @@ namespace Syntwin.Infrastructure.Persistence.Migrations
 
             modelBuilder.Entity("Syntwin.Domain.Entities.FactoryRunTarget", b =>
                 {
-                    b.HasOne("Syntwin.Domain.Entities.RobotCommand", "CancelCommand")
-                        .WithMany()
-                        .HasForeignKey("CancelCommandId")
-                        .OnDelete(DeleteBehavior.Restrict);
-
                     b.HasOne("Syntwin.Domain.Entities.RobotCommand", "Command")
                         .WithMany()
                         .HasForeignKey("CommandId")
@@ -1571,8 +1545,6 @@ namespace Syntwin.Infrastructure.Persistence.Migrations
                         .HasForeignKey("RobotId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
-
-                    b.Navigation("CancelCommand");
 
                     b.Navigation("Command");
 

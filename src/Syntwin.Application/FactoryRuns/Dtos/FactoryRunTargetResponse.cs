@@ -13,6 +13,7 @@ public sealed class FactoryRunTargetResponse
     public Guid? ProgramId { get; set; }
     public Guid? CommandId { get; set; }
     public Guid? PrepareCommandId { get; set; }
+    public Guid? CancelCommandId { get; set; }
 
     public Guid? RuntimeSessionId { get; set; }
 

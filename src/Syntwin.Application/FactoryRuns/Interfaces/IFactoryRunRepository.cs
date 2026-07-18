@@ -10,6 +10,11 @@ public interface IFactoryRunRepository
         Guid factoryRunId,
         CancellationToken cancellationToken = default);
 
+    Task<FactoryRun?> GetByClientRequestIdAsync(
+        Guid userId,
+        Guid clientRequestId,
+        CancellationToken cancellationToken = default);
+
     Task<FactoryRun?> GetByIdForStartAsync(
     Guid factoryRunId,
     CancellationToken cancellationToken = default);

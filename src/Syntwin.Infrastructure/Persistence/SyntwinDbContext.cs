@@ -953,6 +953,9 @@ public sealed class SyntwinDbContext : DbContext
                 .IsRequired()
                 .HasMaxLength(64);
 
+            entity.Property(factoryRun => factoryRun.RequestHash)
+                .HasMaxLength(64);
+
             entity.Property(factoryRun => factoryRun.TargetCount)
                 .IsRequired();
 
@@ -970,6 +973,15 @@ public sealed class SyntwinDbContext : DbContext
 
             entity.HasIndex(factoryRun => factoryRun.CreatedByUserId)
                 .HasDatabaseName("IX_factory_runs_created_by_user_id");
+
+            entity.HasIndex(factoryRun => new
+            {
+                factoryRun.CreatedByUserId,
+                factoryRun.ClientRequestId
+            })
+                .IsUnique()
+                .HasFilter("[ClientRequestId] IS NOT NULL")
+                .HasDatabaseName("UX_factory_runs_user_client_request");
 
             entity.HasIndex(factoryRun => new { factoryRun.CompanyId, factoryRun.Status, factoryRun.CreatedAtUtc })
                 .HasDatabaseName("IX_factory_runs_company_status_created_at");
@@ -1027,10 +1039,19 @@ public sealed class SyntwinDbContext : DbContext
                 .HasDatabaseName("IX_factory_run_targets_program_id");
 
             entity.HasIndex(target => target.PrepareCommandId)
-    .HasDatabaseName("IX_factory_run_targets_prepare_command_id");
+                .IsUnique()
+                .HasFilter("[PrepareCommandId] IS NOT NULL")
+                .HasDatabaseName("UX_factory_run_targets_prepare_command_id");
 
             entity.HasIndex(target => target.CommandId)
-                .HasDatabaseName("IX_factory_run_targets_command_id");
+                .IsUnique()
+                .HasFilter("[CommandId] IS NOT NULL")
+                .HasDatabaseName("UX_factory_run_targets_command_id");
+
+            entity.HasIndex(target => target.CancelCommandId)
+                .IsUnique()
+                .HasFilter("[CancelCommandId] IS NOT NULL")
+                .HasDatabaseName("UX_factory_run_targets_cancel_command_id");
 
             entity.HasIndex(target => new { target.FactoryRunId, target.RobotId })
                 .IsUnique()
@@ -1065,6 +1086,11 @@ public sealed class SyntwinDbContext : DbContext
                 .WithMany()
                 .HasForeignKey(target => target.CommandId)
                 .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(target => target.CancelCommand)
+                .WithMany()
+                .HasForeignKey(target => target.CancelCommandId)
+                .OnDelete(DeleteBehavior.Restrict);
         });
     }
 
@@ -1094,6 +1120,12 @@ public sealed class SyntwinDbContext : DbContext
 
             entity.Property(program => program.LuaContentHash)
                 .IsRequired()
+                .HasMaxLength(64);
+
+            entity.Property(program => program.CompiledProgramJson)
+                .HasColumnType("nvarchar(max)");
+
+            entity.Property(program => program.CompiledProgramHash)
                 .HasMaxLength(64);
 
             entity.Property(program => program.SyncPlanHash)

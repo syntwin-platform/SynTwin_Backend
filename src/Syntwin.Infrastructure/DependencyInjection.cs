@@ -134,7 +134,7 @@ public static class DependencyInjection
         services.AddScoped<IRobotCommandTimeoutScheduler, RedisRobotCommandTimeoutScheduler>();
         services.AddScoped<IRobotCommandService, RobotCommandService>();
         services.AddScoped<IFactoryRunRepository, FactoryRunRepository>();
-        services.AddScoped<IFactoryRunProgramPreparationExecutor,ScopedFactoryRunProgramPreparationExecutor>();
+        services.AddScoped<IFactoryRunProgramPreparationExecutor, ScopedFactoryRunProgramPreparationExecutor>();
         services.AddScoped<IFactoryRunExecutionStrategy, ParallelIndependentFactoryRunStrategy>();
         services.AddScoped<IFactoryRunExecutionStrategy, SynchronizedFactoryRunStrategy>();
         services.AddScoped<FactoryRunExecutionStrategyResolver>();

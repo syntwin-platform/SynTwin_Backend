@@ -4,6 +4,7 @@ using Syntwin.Application.Common.Interfaces;
 using Syntwin.Application.Companies.Interfaces;
 using Syntwin.Application.FactoryRuns.Dtos;
 using Syntwin.Application.FactoryRuns.Interfaces;
+using Syntwin.Application.FactoryRuns.Models;
 using Syntwin.Application.FactoryRuns.Strategies;
 using Syntwin.Application.LuaParsing.Dtos;
 using Syntwin.Application.LuaParsing.Interfaces;
@@ -31,14 +32,18 @@ public sealed class FactoryRunService : IFactoryRunService
     private readonly IRobotRepository _robotRepository;
     private readonly IRobotAccessService _robotAccessService;
     private readonly ILuaProgramImportService _luaProgramImportService;
+    private readonly ILuaProgramParser _luaProgramParser;
+    private readonly ILuaProgramImportMapper _luaProgramImportMapper;
     private readonly IFactoryRunProgramPreparationExecutor _programPreparationExecutor;
     private readonly IRobotCommandRepository _commandRepository;
     private readonly IRobotCommandQueue _commandQueue;
     private readonly IRobotCommandTimeoutScheduler _commandTimeoutScheduler;
+    private readonly IDistributedLock _distributedLock;
     private readonly IRobotBusyLock _robotBusyLock;
     private readonly IRobotRuntimeMetrics _metrics;
     private readonly FactoryRunExecutionStrategyResolver _executionStrategyResolver;
     private readonly TimeSpan _factoryRunBusyLockTtl;
+    private readonly TimeSpan _factoryRunOperationLockTtl;
 
 
     public FactoryRunService(
@@ -47,10 +52,13 @@ public sealed class FactoryRunService : IFactoryRunService
         IRobotRepository robotRepository,
         IRobotAccessService robotAccessService,
         ILuaProgramImportService luaProgramImportService,
+        ILuaProgramParser luaProgramParser,
+        ILuaProgramImportMapper luaProgramImportMapper,
         IFactoryRunProgramPreparationExecutor programPreparationExecutor,
         IRobotCommandRepository commandRepository,
         IRobotCommandQueue commandQueue,
         IRobotCommandTimeoutScheduler commandTimeoutScheduler,
+        IDistributedLock distributedLock,
         IRobotBusyLock robotBusyLock,
         IRobotRuntimeMetrics metrics,
         FactoryRunExecutionStrategyResolver executionStrategyResolver,
@@ -61,15 +69,21 @@ public sealed class FactoryRunService : IFactoryRunService
         _robotRepository = robotRepository;
         _robotAccessService = robotAccessService;
         _luaProgramImportService = luaProgramImportService;
+        _luaProgramParser = luaProgramParser;
+        _luaProgramImportMapper = luaProgramImportMapper;
         _programPreparationExecutor = programPreparationExecutor;
         _commandRepository = commandRepository;
         _commandQueue = commandQueue;
         _commandTimeoutScheduler = commandTimeoutScheduler;
+        _distributedLock = distributedLock;
         _robotBusyLock = robotBusyLock;
         _metrics = metrics;
         _executionStrategyResolver = executionStrategyResolver;
         _factoryRunBusyLockTtl = TimeSpan.FromSeconds(Math.Max(
             60,
+            runtimeOptions.Value.FactoryRunBusyLockTtlSeconds));
+        _factoryRunOperationLockTtl = TimeSpan.FromSeconds(Math.Max(
+            120,
             runtimeOptions.Value.FactoryRunBusyLockTtlSeconds));
     }
 
@@ -80,6 +94,37 @@ public sealed class FactoryRunService : IFactoryRunService
         CancellationToken cancellationToken = default)
     {
         var normalizedRequest = NormalizeCreateRequest(request);
+        var requestHash = ComputeCreateRequestHash(request, normalizedRequest);
+
+        if (request.ClientRequestId == Guid.Empty)
+        {
+            throw new InvalidOperationException(
+                "ClientRequestId must be a non-empty UUID when provided.");
+        }
+
+        await using var createLock = request.ClientRequestId.HasValue
+            ? await AcquireOperationLockAsync(
+                $"factory-run:create:{userId:N}:{request.ClientRequestId.Value:N}",
+                TimeSpan.FromSeconds(10),
+                cancellationToken)
+            : null;
+
+        if (request.ClientRequestId.HasValue && createLock is null)
+        {
+            var inProgressRun = await _factoryRunRepository.GetByClientRequestIdAsync(
+                userId,
+                request.ClientRequestId.Value,
+                cancellationToken);
+
+            if (inProgressRun is not null)
+            {
+                EnsureMatchingIdempotentCreate(inProgressRun, requestHash);
+                return ToResponse(inProgressRun);
+            }
+
+            throw new InvalidOperationException(
+                "The same FactoryRun create request is still being processed. Retry with the same ClientRequestId.");
+        }
 
         var company = await _companyRepository.GetByIdAsync(request.CompanyId, cancellationToken);
         if (company is null || company.Status != CompanyStatus.Active)
@@ -90,6 +135,20 @@ public sealed class FactoryRunService : IFactoryRunService
         if (!await HasCompanyAccessAsync(userId, request.CompanyId, cancellationToken))
         {
             return null;
+        }
+
+        if (request.ClientRequestId.HasValue)
+        {
+            var existingRun = await _factoryRunRepository.GetByClientRequestIdAsync(
+                userId,
+                request.ClientRequestId.Value,
+                cancellationToken);
+
+            if (existingRun is not null)
+            {
+                EnsureMatchingIdempotentCreate(existingRun, requestHash);
+                return ToResponse(existingRun);
+            }
         }
 
         var robotIds = normalizedRequest.Targets
@@ -117,6 +176,9 @@ public sealed class FactoryRunService : IFactoryRunService
             }
         }
 
+        var compiledProgramsByContentHash = CompileFactoryRunPrograms(
+            normalizedRequest.Programs);
+
         var now = DateTimeOffset.UtcNow;
         var factoryRunId = Guid.NewGuid();
         var programByHash = new Dictionary<string, FactoryRunProgram>(
@@ -127,6 +189,7 @@ public sealed class FactoryRunService : IFactoryRunService
         foreach (var programRequest in normalizedRequest.Programs)
         {
             var contentHash = ComputeSha256(programRequest.LuaContent);
+            var compiledProgram = compiledProgramsByContentHash[contentHash];
 
             if (!programByHash.TryGetValue(contentHash, out var sourceProgram))
             {
@@ -139,6 +202,8 @@ public sealed class FactoryRunService : IFactoryRunService
                     LuaFileName = programRequest.LuaFileName,
                     LuaContent = programRequest.LuaContent,
                     LuaContentHash = contentHash,
+                    CompiledProgramJson = compiledProgram.CompiledProgramJson,
+                    CompiledProgramHash = compiledProgram.CompiledProgramHash,
                     CreatedAtUtc = now
                 };
 
@@ -154,6 +219,8 @@ public sealed class FactoryRunService : IFactoryRunService
             Id = factoryRunId,
             CompanyId = request.CompanyId,
             CreatedByUserId = userId,
+            ClientRequestId = request.ClientRequestId,
+            RequestHash = requestHash,
             Status = FactoryRunStatus.Created,
             CoordinationMode = request.CoordinationMode,
             FailurePolicy = request.FailurePolicy,
@@ -198,6 +265,11 @@ public sealed class FactoryRunService : IFactoryRunService
         string? ipAddress,
         CancellationToken cancellationToken = default)
     {
+        await using var operationLock = await AcquireOperationLockAsync(
+            $"factory-run:transition:{factoryRunId:N}",
+            TimeSpan.FromSeconds(3),
+            cancellationToken);
+
         var factoryRun = await GetAuthorizedFactoryRunAsync(
             userId,
             factoryRunId,
@@ -208,6 +280,16 @@ public sealed class FactoryRunService : IFactoryRunService
             return null;
         }
 
+        if (operationLock is null)
+        {
+            return ToResponse(factoryRun);
+        }
+
+        if (factoryRun.Status == FactoryRunStatus.Preparing)
+        {
+            await RecoverInterruptedPrepareAsync(factoryRun, cancellationToken);
+        }
+
         var statusBeforeRefresh = factoryRun.Status;
         var refreshed = await RefreshFromCommandsAsync(factoryRun, cancellationToken);
 
@@ -216,14 +298,9 @@ public sealed class FactoryRunService : IFactoryRunService
             RecordFactoryRunOutcomeTransition(statusBeforeRefresh, factoryRun);
         }
 
-        if (factoryRun.Status is FactoryRunStatus.Ready or FactoryRunStatus.WaitingForReady)
-        {
-            return ToResponse(factoryRun);
-        }
-
         if (factoryRun.Status != FactoryRunStatus.Created)
         {
-            throw new InvalidOperationException("Only a newly created factory run can be prepared.");
+            return ToResponse(factoryRun);
         }
 
         var preparationStopwatch = Stopwatch.StartNew();
@@ -245,6 +322,7 @@ public sealed class FactoryRunService : IFactoryRunService
         }
 
         await _factoryRunRepository.SaveChangesAsync(cancellationToken);
+        var durableOperationToken = CancellationToken.None;
 
         try
         {
@@ -256,7 +334,7 @@ public sealed class FactoryRunService : IFactoryRunService
                     target.RobotId,
                     prepareLockOwnerId,
                     _factoryRunBusyLockTtl,
-                    cancellationToken);
+                    durableOperationToken);
 
                 if (!lockAcquired)
                 {
@@ -304,26 +382,48 @@ public sealed class FactoryRunService : IFactoryRunService
             {
                 var representativeTarget = sourceGroup.First();
                 var sourceProgram = representativeTarget.FactoryRunProgram;
-                var importRequest = new LuaParseRequest
+                CreateRobotProgramRequest? compiledRequest = null;
+                string? previewError = null;
+
+                if (sourceProgram is not null &&
+                    !string.IsNullOrWhiteSpace(sourceProgram.CompiledProgramJson))
                 {
-                    FileName = sourceProgram?.LuaFileName ?? factoryRun.LuaFileName,
-                    LuaContent = sourceProgram?.LuaContent ?? factoryRun.LuaContent
-                };
+                    try
+                    {
+                        compiledRequest = DeserializeCompiledProgram(sourceProgram);
+                    }
+                    catch (InvalidOperationException exception)
+                    {
+                        previewError = exception.Message;
+                    }
+                }
+                else
+                {
+                    // Compatibility path for FactoryRun rows created before the
+                    // immutable compiled-program contract was introduced.
+                    var importRequest = new LuaParseRequest
+                    {
+                        FileName = sourceProgram?.LuaFileName ?? factoryRun.LuaFileName,
+                        LuaContent = sourceProgram?.LuaContent ?? factoryRun.LuaContent
+                    };
 
-                var importPreview = await _luaProgramImportService.PreviewAsync(
-                    userId,
-                    representativeTarget.RobotId,
-                    importRequest,
-                    cancellationToken);
+                    var importPreview = await _luaProgramImportService.PreviewAsync(
+                        userId,
+                        representativeTarget.RobotId,
+                        importRequest,
+                        durableOperationToken);
 
-                var previewError = importPreview is null
-                    ? "Robot not found or access denied."
-                    : importPreview.CreateProgramRequest is null
-                        ? importPreview.Diagnostics
-                            .FirstOrDefault(diagnostic => diagnostic.Severity == "error")
-                            ?.Message ??
-                            "The LUA file does not contain any valid robot program steps."
-                        : null;
+                    previewError = importPreview is null
+                        ? "Robot not found or access denied."
+                        : !importPreview.ExecutionReady
+                            ? GetLuaExecutionReadinessError(importPreview)
+                            : null;
+                    compiledRequest = importPreview?.CreateProgramRequest;
+                }
+
+                previewError ??= compiledRequest is null
+                    ? "The LUA file does not contain an executable robot program."
+                    : null;
 
                 if (previewError is not null)
                 {
@@ -347,7 +447,7 @@ public sealed class FactoryRunService : IFactoryRunService
                     {
                         RobotId = target.RobotId,
                         CreateProgramRequest = CloneCreateProgramRequest(
-                            importPreview!.CreateProgramRequest!)
+                            compiledRequest!)
                     });
                 }
             }
@@ -358,7 +458,7 @@ public sealed class FactoryRunService : IFactoryRunService
                     preparationItems,
                     ipAddress,
                     maxConcurrency: 3,
-                    cancellationToken: cancellationToken);
+                    cancellationToken: durableOperationToken);
 
             var preparationResultsByRobotId = preparationResults
                 .ToDictionary(result => result.RobotId);
@@ -435,14 +535,14 @@ public sealed class FactoryRunService : IFactoryRunService
             // owner-aware Redis cleanup.
             if (isolatedPreparationLocks.Count > 0)
             {
-                await _factoryRunRepository.SaveChangesAsync(cancellationToken);
+                await _factoryRunRepository.SaveChangesAsync(durableOperationToken);
 
                 foreach (var isolatedLock in isolatedPreparationLocks)
                 {
                     await _robotBusyLock.ReleaseAsync(
                         isolatedLock.RobotId,
                         isolatedLock.OwnerId,
-                        cancellationToken);
+                        durableOperationToken);
                     acquiredLocks.Remove(isolatedLock);
                 }
             }
@@ -461,7 +561,9 @@ public sealed class FactoryRunService : IFactoryRunService
                 target.Status = FactoryRunTargetStatus.WaitingForDeviceReady;
                 target.UpdatedAtUtc = DateTimeOffset.UtcNow;
 
-                await _commandRepository.AddAsync(prepareCommand, cancellationToken);
+                await _commandRepository.AddAsync(
+                    prepareCommand,
+                    durableOperationToken);
                 prepareCommandsToDispatch.Add(prepareCommand);
             }
 
@@ -470,17 +572,17 @@ public sealed class FactoryRunService : IFactoryRunService
             factoryRun.FailureReason = null;
             factoryRun.UpdatedAtUtc = DateTimeOffset.UtcNow;
 
-            await _factoryRunRepository.SaveChangesAsync(cancellationToken);
+            await _factoryRunRepository.SaveChangesAsync(durableOperationToken);
             prepareCommandsPersisted = true;
             await Task.WhenAll(
                 prepareCommandsToDispatch.Select(command =>
                     _commandTimeoutScheduler.ScheduleAsync(
                         command,
-                        cancellationToken)));
+                        durableOperationToken)));
 
             await _commandQueue.EnqueueManyAsync(
                 prepareCommandsToDispatch,
-                cancellationToken);
+                durableOperationToken);
 
             preparationSucceeded = true;
             return ToResponse(factoryRun);
@@ -579,6 +681,11 @@ public sealed class FactoryRunService : IFactoryRunService
         string? ipAddress,
         CancellationToken cancellationToken = default)
     {
+        await using var operationLock = await AcquireOperationLockAsync(
+            $"factory-run:transition:{factoryRunId:N}",
+            TimeSpan.FromSeconds(3),
+            cancellationToken);
+
         var factoryRun = await GetAuthorizedFactoryRunForStartAsync(
             userId,
             factoryRunId,
@@ -587,6 +694,23 @@ public sealed class FactoryRunService : IFactoryRunService
         if (factoryRun is null)
         {
             return null;
+        }
+
+        if (operationLock is null)
+        {
+            return ToResponse(factoryRun);
+        }
+
+        if (factoryRun.Status == FactoryRunStatus.Starting)
+        {
+            var recoveredResponse = await RecoverInterruptedStartAsync(
+                factoryRun,
+                cancellationToken);
+
+            if (recoveredResponse is not null)
+            {
+                return recoveredResponse;
+            }
         }
 
         var statusBeforeRefresh = factoryRun.Status;
@@ -598,7 +722,7 @@ public sealed class FactoryRunService : IFactoryRunService
 
         if (factoryRun.Status != FactoryRunStatus.Ready)
         {
-            throw new InvalidOperationException("Factory run can only start after all devices report Ready.");
+            return ToResponse(factoryRun);
         }
 
         var executionStrategy = _executionStrategyResolver.Resolve(
@@ -639,7 +763,10 @@ public sealed class FactoryRunService : IFactoryRunService
 
                 return (
                     Target: target,
-                    CommandId: Guid.NewGuid(),
+                    CommandId: FactoryRunOperationIdentity.CreateCommandId(
+                        factoryRun.Id,
+                        target.Id,
+                        "run"),
                     PayloadJson: BuildFactoryRunSnapshotPayload(
                         target,
                         factoryRun.Id,
@@ -663,6 +790,7 @@ public sealed class FactoryRunService : IFactoryRunService
         }
 
         await _factoryRunRepository.SaveChangesAsync(cancellationToken);
+        var durableOperationToken = CancellationToken.None;
 
         var commandsToDispatch = new List<RobotCommand>();
         var acquiredRunLocks = new List<(Guid RobotId, Guid CommandId)>();
@@ -679,7 +807,7 @@ public sealed class FactoryRunService : IFactoryRunService
                     target.Id,
                     runCommandId,
                     _factoryRunBusyLockTtl,
-                    cancellationToken);
+                    durableOperationToken);
 
                 if (!runLockAcquired)
                 {
@@ -712,7 +840,7 @@ public sealed class FactoryRunService : IFactoryRunService
 
                 };
 
-                await _commandRepository.AddAsync(command, cancellationToken);
+                await _commandRepository.AddAsync(command, durableOperationToken);
                 commandsToDispatch.Add(command);
 
                 // Set both sides after the principal command is tracked so EF can
@@ -743,7 +871,7 @@ public sealed class FactoryRunService : IFactoryRunService
                 : null;
             factoryRun.UpdatedAtUtc = DateTimeOffset.UtcNow;
 
-            await _factoryRunRepository.SaveChangesAsync(cancellationToken);
+            await _factoryRunRepository.SaveChangesAsync(durableOperationToken);
 
             if (
                 executionStrategy.Mode == FactoryCoordinationMode.ParallelIndependent &&
@@ -752,7 +880,7 @@ public sealed class FactoryRunService : IFactoryRunService
                 var dispatchedCount = await DispatchIndependentCommandsAsync(
                     factoryRun,
                     commandsToDispatch,
-                    cancellationToken);
+                    durableOperationToken);
 
                 if (dispatchedCount == 0)
                 {
@@ -763,9 +891,13 @@ public sealed class FactoryRunService : IFactoryRunService
             else
             {
                 await Task.WhenAll(commandsToDispatch.Select(command =>
-                    _commandTimeoutScheduler.ScheduleAsync(command, cancellationToken)));
+                    _commandTimeoutScheduler.ScheduleAsync(
+                        command,
+                        durableOperationToken)));
 
-                await _commandQueue.EnqueueManyAsync(commandsToDispatch, cancellationToken);
+                await _commandQueue.EnqueueManyAsync(
+                    commandsToDispatch,
+                    durableOperationToken);
             }
 
             return ToResponse(factoryRun);
@@ -840,6 +972,11 @@ public sealed class FactoryRunService : IFactoryRunService
         string? ipAddress,
         CancellationToken cancellationToken = default)
     {
+        await using var operationLock = await AcquireOperationLockAsync(
+            $"factory-run:transition:{factoryRunId:N}",
+            TimeSpan.FromSeconds(3),
+            cancellationToken);
+
         var factoryRun = await GetAuthorizedFactoryRunAsync(
             userId,
             factoryRunId,
@@ -848,6 +985,11 @@ public sealed class FactoryRunService : IFactoryRunService
         if (factoryRun is null)
         {
             return null;
+        }
+
+        if (operationLock is null)
+        {
+            return ToResponse(factoryRun);
         }
 
         var statusBeforeRefresh = factoryRun.Status;
@@ -868,7 +1010,11 @@ public sealed class FactoryRunService : IFactoryRunService
 
         var now = DateTimeOffset.UtcNow;
         var shouldSendEStop = factoryRun.Targets.Any(target =>
-    target.Status is FactoryRunTargetStatus.Starting or FactoryRunTargetStatus.Armed or FactoryRunTargetStatus.Running);
+            target.Status is
+                FactoryRunTargetStatus.Starting or
+                FactoryRunTargetStatus.Armed or
+                FactoryRunTargetStatus.Running);
+        var durableOperationToken = CancellationToken.None;
 
         factoryRun.Status = shouldSendEStop
             ? FactoryRunStatus.Cancelling
@@ -879,6 +1025,7 @@ public sealed class FactoryRunService : IFactoryRunService
             ? "Cancel requested. EStop commands were queued for running robots."
             : "Factory run was cancelled before start.";
         factoryRun.UpdatedAtUtc = now;
+        var cancelCommandsToDispatch = new List<RobotCommand>();
 
         foreach (var target in factoryRun.Targets)
         {
@@ -890,25 +1037,41 @@ public sealed class FactoryRunService : IFactoryRunService
             if (shouldSendEStop &&
                 target.Status is (FactoryRunTargetStatus.Starting or FactoryRunTargetStatus.Armed or FactoryRunTargetStatus.Running))
             {
-                var eStopCommand = new RobotCommand
-                {
-                    Id = Guid.NewGuid(),
-                    RobotId = target.RobotId,
-                    UserId = userId,
-                    CommandType = RobotCommandType.EStop,
-                    PayloadJson = JsonSerializer.Serialize(new
-                    {
-                        factoryRunId = factoryRun.Id,
-                        reason = "FactoryRun cancel requested"
-                    }),
-                    Status = CommandStatus.Pending,
-                    CreatedAt = now,
-                    TimeoutAt = now.Add(DefaultCommandTimeout)
-                };
+                var eStopCommand = target.CancelCommand;
 
-                await _commandRepository.AddAsync(eStopCommand, cancellationToken);
-                await _factoryRunRepository.SaveChangesAsync(cancellationToken);
-                await _commandQueue.EnqueueAsync(eStopCommand, cancellationToken);
+                if (eStopCommand is null)
+                {
+                    eStopCommand = new RobotCommand
+                    {
+                        Id = FactoryRunOperationIdentity.CreateCommandId(
+                            factoryRun.Id,
+                            target.Id,
+                            "cancel"),
+                        RobotId = target.RobotId,
+                        UserId = userId,
+                        CommandType = RobotCommandType.EStop,
+                        PayloadJson = JsonSerializer.Serialize(new
+                        {
+                            factoryRunId = factoryRun.Id,
+                            targetId = target.Id,
+                            reason = "FactoryRun cancel requested"
+                        }),
+                        Status = CommandStatus.Pending,
+                        CreatedAt = now,
+                        TimeoutAt = now.Add(DefaultCommandTimeout)
+                    };
+
+                    await _commandRepository.AddAsync(
+                        eStopCommand,
+                        durableOperationToken);
+                    target.CancelCommand = eStopCommand;
+                    target.CancelCommandId = eStopCommand.Id;
+                }
+
+                if (eStopCommand.Status == CommandStatus.Pending)
+                {
+                    cancelCommandsToDispatch.Add(eStopCommand);
+                }
 
                 target.FailureReason = "Cancel requested; EStop queued.";
                 target.UpdatedAtUtc = now;
@@ -923,21 +1086,32 @@ public sealed class FactoryRunService : IFactoryRunService
                 await _robotBusyLock.ReleaseAsync(
                     target.RobotId,
                     target.Id,
-                    cancellationToken);
+                    durableOperationToken);
 
                 if (target.CommandId.HasValue)
                 {
                     await _robotBusyLock.ReleaseAsync(
                         target.RobotId,
                         target.CommandId.Value,
-                        cancellationToken);
+                        durableOperationToken);
                 }
 
                 target.UpdatedAtUtc = now;
             }
         }
 
-        await _factoryRunRepository.SaveChangesAsync(cancellationToken);
+        await _factoryRunRepository.SaveChangesAsync(durableOperationToken);
+
+        if (cancelCommandsToDispatch.Count > 0)
+        {
+            await Task.WhenAll(cancelCommandsToDispatch.Select(command =>
+                _commandTimeoutScheduler.ScheduleAsync(
+                    command,
+                    durableOperationToken)));
+            await _commandQueue.EnqueueManyAsync(
+                cancelCommandsToDispatch,
+                durableOperationToken);
+        }
 
         if (factoryRun.Status == FactoryRunStatus.Cancelled)
         {
@@ -1012,6 +1186,153 @@ public sealed class FactoryRunService : IFactoryRunService
             ? factoryRun
             : null;
     }
+
+    private async Task RecoverInterruptedPrepareAsync(
+        FactoryRun factoryRun,
+        CancellationToken cancellationToken)
+    {
+        var nonTerminalTargets = factoryRun.Targets
+            .Where(target => target.Status is not (
+                FactoryRunTargetStatus.Completed or
+                FactoryRunTargetStatus.Failed or
+                FactoryRunTargetStatus.Cancelled))
+            .ToList();
+        var targetsWithPersistedCommands = nonTerminalTargets
+            .Where(target => target.PrepareCommandId.HasValue)
+            .ToList();
+
+        if (targetsWithPersistedCommands.Count > 0)
+        {
+            var now = DateTimeOffset.UtcNow;
+
+            foreach (var target in nonTerminalTargets)
+            {
+                if (target.PrepareCommandId.HasValue)
+                {
+                    target.Status = FactoryRunTargetStatus.WaitingForDeviceReady;
+                }
+                else
+                {
+                    target.Status = FactoryRunTargetStatus.Failed;
+                    target.TerminationReason =
+                        FactoryRunTargetTerminationReason.CommandFailure;
+                    target.ReadinessError =
+                        "FactoryRun preparation was interrupted before its command was persisted.";
+                    target.FailureReason = target.ReadinessError;
+                    target.CompletedAtUtc = now;
+
+                    await _robotBusyLock.ReleaseAsync(
+                        target.RobotId,
+                        target.Id,
+                        cancellationToken);
+                }
+
+                target.UpdatedAtUtc = now;
+            }
+
+            factoryRun.Status = FactoryRunStatus.WaitingForReady;
+            factoryRun.FailureReason =
+                "Recovered an interrupted FactoryRun preparation.";
+            factoryRun.UpdatedAtUtc = now;
+            await _factoryRunRepository.SaveChangesAsync(cancellationToken);
+
+            var pendingPrepareCommands = targetsWithPersistedCommands
+                .Select(target => target.PrepareCommand)
+                .Where(command => command?.Status == CommandStatus.Pending)
+                .Cast<RobotCommand>()
+                .ToList();
+
+            if (pendingPrepareCommands.Count > 0)
+            {
+                await Task.WhenAll(pendingPrepareCommands.Select(command =>
+                    _commandTimeoutScheduler.ScheduleAsync(
+                        command,
+                        cancellationToken)));
+                await _commandQueue.EnqueueManyAsync(
+                    pendingPrepareCommands,
+                    cancellationToken);
+            }
+
+            return;
+        }
+
+        foreach (var target in nonTerminalTargets)
+        {
+            await _robotBusyLock.ReleaseAsync(
+                target.RobotId,
+                target.Id,
+                cancellationToken);
+
+            target.ProgramId = null;
+            target.PrepareCommandId = null;
+            target.PrepareCommand = null;
+            target.Status = FactoryRunTargetStatus.Pending;
+            target.TerminationReason = null;
+            target.ReadinessError = null;
+            target.PrepareStartedAtUtc = null;
+            target.PreparedAtUtc = null;
+            target.ReadyAtUtc = null;
+            target.FailureReason = null;
+            target.CompletedAtUtc = null;
+            target.UpdatedAtUtc = DateTimeOffset.UtcNow;
+        }
+
+        factoryRun.Status = FactoryRunStatus.Created;
+        factoryRun.PreparedAtUtc = null;
+        factoryRun.FailureReason = null;
+        factoryRun.UpdatedAtUtc = DateTimeOffset.UtcNow;
+        await _factoryRunRepository.SaveChangesAsync(cancellationToken);
+    }
+
+    private async Task<FactoryRunResponse?> RecoverInterruptedStartAsync(
+        FactoryRun factoryRun,
+        CancellationToken cancellationToken)
+    {
+        var persistedCommands = factoryRun.Targets
+            .Select(target => target.Command)
+            .Where(command => command is not null)
+            .Cast<RobotCommand>()
+            .ToList();
+
+        if (persistedCommands.Count > 0)
+        {
+            var pendingCommands = persistedCommands
+                .Where(command => command.Status == CommandStatus.Pending)
+                .ToList();
+
+            if (pendingCommands.Count > 0)
+            {
+                await Task.WhenAll(pendingCommands.Select(command =>
+                    _commandTimeoutScheduler.ScheduleAsync(
+                        command,
+                        cancellationToken)));
+                await _commandQueue.EnqueueManyAsync(
+                    pendingCommands,
+                    cancellationToken);
+            }
+
+            return ToResponse(factoryRun);
+        }
+
+        var now = DateTimeOffset.UtcNow;
+
+        foreach (var target in factoryRun.Targets.Where(target =>
+                     target.Status == FactoryRunTargetStatus.Starting &&
+                     !target.CommandId.HasValue))
+        {
+            target.Status = FactoryRunTargetStatus.Ready;
+            target.UpdatedAtUtc = now;
+        }
+
+        factoryRun.Status = FactoryRunStatus.Ready;
+        factoryRun.ScheduledStartAtUtc = null;
+        factoryRun.StartedAtUtc = null;
+        factoryRun.FailureReason = null;
+        factoryRun.UpdatedAtUtc = now;
+        await _factoryRunRepository.SaveChangesAsync(cancellationToken);
+        return null;
+    }
+
     private async Task<bool> HasCompanyAccessAsync(
         Guid userId,
         Guid companyId,
@@ -1505,7 +1826,10 @@ public sealed class FactoryRunService : IFactoryRunService
 
         return new RobotCommand
         {
-            Id = Guid.NewGuid(),
+            Id = FactoryRunOperationIdentity.CreateCommandId(
+                factoryRunId,
+                targetId,
+                "prepare"),
             RobotId = robotId,
             UserId = userId,
             CommandType = RobotCommandType.PrepareProgram,
@@ -1522,6 +1846,7 @@ public sealed class FactoryRunService : IFactoryRunService
             TimeoutAt = now.Add(DefaultCommandTimeout)
         };
     }
+
 
     private async Task<int> DispatchIndependentCommandsAsync(
         FactoryRun factoryRun,
@@ -1713,10 +2038,184 @@ public sealed class FactoryRunService : IFactoryRunService
         return JsonSerializer.Serialize(durations.Select(duration => Math.Max(0, duration)).ToArray());
     }
 
+    private Dictionary<string, CompiledFactoryRunProgram> CompileFactoryRunPrograms(
+        IReadOnlyList<NormalizedFactoryRunProgramRequest> programs)
+    {
+        var compiledByContentHash = new Dictionary<string, CompiledFactoryRunProgram>(
+            StringComparer.OrdinalIgnoreCase);
+
+        foreach (var program in programs)
+        {
+            var luaContentHash = ComputeSha256(program.LuaContent);
+
+            if (compiledByContentHash.ContainsKey(luaContentHash))
+            {
+                continue;
+            }
+
+            var parseResult = _luaProgramParser.Parse(
+                program.LuaContent,
+                program.LuaFileName);
+            var preview = _luaProgramImportMapper.ToPreviewResponse(parseResult);
+
+            if (!preview.ExecutionReady || preview.CreateProgramRequest is null)
+            {
+                throw new InvalidOperationException(
+                    $"LUA program '{program.LuaFileName}' is not execution-ready: " +
+                    GetLuaExecutionReadinessError(preview));
+            }
+
+            var compiledProgramJson = JsonSerializer.Serialize(preview.CreateProgramRequest);
+            var compiledProgramHash = ComputeSha256(compiledProgramJson);
+
+            if (!string.Equals(
+                    preview.CompiledProgramHash,
+                    compiledProgramHash,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidOperationException(
+                    $"LUA program '{program.LuaFileName}' produced an inconsistent compiled hash.");
+            }
+
+            compiledByContentHash.Add(
+                luaContentHash,
+                new CompiledFactoryRunProgram(
+                    compiledProgramJson,
+                    compiledProgramHash));
+        }
+
+        return compiledByContentHash;
+    }
+
+    private static CreateRobotProgramRequest DeserializeCompiledProgram(
+        FactoryRunProgram sourceProgram)
+    {
+        if (string.IsNullOrWhiteSpace(sourceProgram.CompiledProgramJson) ||
+            string.IsNullOrWhiteSpace(sourceProgram.CompiledProgramHash))
+        {
+            throw new InvalidOperationException(
+                "The FactoryRun compiled program snapshot is incomplete.");
+        }
+
+        var actualHash = ComputeSha256(sourceProgram.CompiledProgramJson);
+
+        if (!string.Equals(
+                actualHash,
+                sourceProgram.CompiledProgramHash,
+                StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException(
+                "The FactoryRun compiled program snapshot failed its integrity check.");
+        }
+
+        return JsonSerializer.Deserialize<CreateRobotProgramRequest>(
+                   sourceProgram.CompiledProgramJson)
+               ?? throw new InvalidOperationException(
+                   "The FactoryRun compiled program snapshot could not be deserialized.");
+    }
+
+    private static string GetLuaExecutionReadinessError(
+        LuaParsePreviewResponse preview)
+    {
+        var parseError = preview.Diagnostics.FirstOrDefault(diagnostic =>
+            string.Equals(diagnostic.Severity, "error", StringComparison.OrdinalIgnoreCase));
+
+        if (parseError is not null)
+        {
+            return $"Line {parseError.Line}: {parseError.Message}";
+        }
+
+        var unsupportedStep = preview.UnsupportedSteps
+            .OrderBy(step => step.OrderIndex)
+            .FirstOrDefault();
+
+        if (unsupportedStep is not null)
+        {
+            return $"Step {unsupportedStep.OrderIndex} '{unsupportedStep.Label}' " +
+                   $"({unsupportedStep.StepType}): {unsupportedStep.Reason}";
+        }
+
+        return "The LUA file does not contain an executable robot program.";
+    }
+
     private static string ComputeSha256(string content)
     {
         var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(content));
         return Convert.ToHexString(bytes).ToLowerInvariant();
+    }
+
+    private static string ComputeCreateRequestHash(
+        CreateFactoryRunRequest request,
+        NormalizedFactoryRunCreateRequest normalizedRequest)
+    {
+        var canonicalRequest = new
+        {
+            request.CompanyId,
+            CoordinationMode = request.CoordinationMode.ToString(),
+            FailurePolicy = request.FailurePolicy.ToString(),
+            Programs = normalizedRequest.Programs
+                .OrderBy(program => program.Key, StringComparer.Ordinal)
+                .Select(program => new
+                {
+                    program.Key,
+                    program.ProgramName,
+                    program.LuaFileName,
+                    LuaContentHash = ComputeSha256(program.LuaContent)
+                }),
+            Targets = normalizedRequest.Targets
+                .OrderBy(target => target.RobotId)
+                .ThenBy(target => target.ProgramKey, StringComparer.Ordinal)
+                .Select(target => new
+                {
+                    target.RobotId,
+                    target.ProgramKey
+                })
+        };
+
+        return ComputeSha256(JsonSerializer.Serialize(canonicalRequest));
+    }
+
+    private static void EnsureMatchingIdempotentCreate(
+        FactoryRun existingRun,
+        string requestHash)
+    {
+        if (!string.Equals(
+                existingRun.RequestHash,
+                requestHash,
+                StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException(
+                "ClientRequestId was already used for a different FactoryRun request.");
+        }
+    }
+
+    private async Task<IDistributedLockHandle?> AcquireOperationLockAsync(
+        string key,
+        TimeSpan maxWait,
+        CancellationToken cancellationToken)
+    {
+        var deadline = DateTimeOffset.UtcNow.Add(maxWait);
+
+        do
+        {
+            var handle = await _distributedLock.TryAcquireAsync(
+                key,
+                _factoryRunOperationLockTtl,
+                cancellationToken);
+
+            if (handle is not null)
+            {
+                return handle;
+            }
+
+            if (DateTimeOffset.UtcNow >= deadline)
+            {
+                return null;
+            }
+
+            await Task.Delay(50, cancellationToken);
+        }
+        while (true);
     }
 
     private static FactoryRunResponse ToResponse(FactoryRun factoryRun)
@@ -1726,6 +2225,7 @@ public sealed class FactoryRunService : IFactoryRunService
             Id = factoryRun.Id,
             CompanyId = factoryRun.CompanyId,
             CreatedByUserId = factoryRun.CreatedByUserId,
+            ClientRequestId = factoryRun.ClientRequestId,
             Status = factoryRun.Status.ToString(),
             CoordinationMode = factoryRun.CoordinationMode.ToString(),
             FailurePolicy = factoryRun.FailurePolicy.ToString(),
@@ -1753,6 +2253,7 @@ public sealed class FactoryRunService : IFactoryRunService
                     ProgramName = program.ProgramName,
                     LuaFileName = program.LuaFileName,
                     LuaContentHash = program.LuaContentHash,
+                    CompiledProgramHash = program.CompiledProgramHash,
                     SyncPlanHash = program.SyncPlanHash
                 })
                 .ToList(),
@@ -1774,6 +2275,7 @@ public sealed class FactoryRunService : IFactoryRunService
             ProgramId = target.ProgramId,
             PrepareCommandId = target.PrepareCommandId,
             CommandId = target.CommandId,
+            CancelCommandId = target.CancelCommandId,
 
             RuntimeSessionId = target.RuntimeSessionId,
             Status = target.Status.ToString(),
@@ -1806,4 +2308,8 @@ public sealed class FactoryRunService : IFactoryRunService
     private sealed record NormalizedFactoryRunTargetRequest(
         Guid RobotId,
         string ProgramKey);
+
+    private sealed record CompiledFactoryRunProgram(
+        string CompiledProgramJson,
+        string CompiledProgramHash);
 }
