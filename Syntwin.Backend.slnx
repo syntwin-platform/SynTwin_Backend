@@ -7,5 +7,6 @@
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Syntwin.Application.Tests/Syntwin.Application.Tests.csproj" />
+    <Project Path="tests/Syntwin.Integration.Tests/Syntwin.Integration.Tests.csproj" />
   </Folder>
 </Solution>

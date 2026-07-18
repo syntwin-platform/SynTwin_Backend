@@ -1,20 +1,18 @@
-using Syntwin.Infrastructure;
-using System.Text;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
-using Microsoft.AspNetCore.RateLimiting;
-using System.Threading.RateLimiting;
+using StackExchange.Redis;
+using Syntwin.Api.BackgroundServices;
+using Syntwin.Api.HealthChecks;
 using Syntwin.Api.Hubs;
 using Syntwin.Api.Realtime;
 using Syntwin.Application.Realtime.Interfaces;
-using Syntwin.Api.BackgroundServices;
-using StackExchange.Redis;
+using Syntwin.Infrastructure;
+using System.Text;
 using System.Text.Json;
-using Microsoft.AspNetCore.Diagnostics.HealthChecks;
-using Microsoft.Extensions.Diagnostics.HealthChecks;
-using Syntwin.Api.HealthChecks;
 using System.Text.Json.Serialization;
 
 const string CorsPolicyName = "SyntwinCors";
@@ -234,3 +232,7 @@ app.MapHealthChecks("/health/ready", new HealthCheckOptions
     }
 });
 app.Run();
+
+// Exposes the top-level entry point to WebApplicationFactory without changing
+// the production hosting pipeline.
+public partial class Program;

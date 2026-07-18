@@ -17,6 +17,7 @@ public sealed class FactoryRunTarget
     public Guid? ProgramId { get; set; }
     public Guid? PrepareCommandId { get; set; }
     public Guid? CommandId { get; set; }
+    public Guid? CancelCommandId { get; set; }
 
     public Guid? RuntimeSessionId { get; set; }
 
@@ -62,4 +63,6 @@ public sealed class FactoryRunTarget
     public RobotCommand? PrepareCommand { get; set; }
 
     public RobotCommand? Command { get; set; }
+
+    public RobotCommand? CancelCommand { get; set; }
 }

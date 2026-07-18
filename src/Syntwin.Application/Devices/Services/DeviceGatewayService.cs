@@ -1289,10 +1289,10 @@ CancellationToken cancellationToken)
   string? ipAddress,
   CancellationToken cancellationToken)
     {
-if (request.RobotId != robotId)
-{
-    throw new InvalidOperationException("RobotId in body does not match authenticated device.");
-}
+        if (request.RobotId != robotId)
+        {
+            throw new InvalidOperationException("RobotId in body does not match authenticated device.");
+        }
 
         var requestedStatus = ValidateCommandResultStatus(request);
 

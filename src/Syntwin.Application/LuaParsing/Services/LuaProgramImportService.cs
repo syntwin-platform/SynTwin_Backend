@@ -80,13 +80,25 @@ public sealed class LuaProgramImportService : ILuaProgramImportService
             return null;
         }
 
-        if (preview.CreateProgramRequest is null)
+        if (!preview.ExecutionReady || preview.CreateProgramRequest is null)
         {
             var firstError = preview.Diagnostics
-                .FirstOrDefault(diagnostic => diagnostic.Severity == "error");
+                .FirstOrDefault(diagnostic =>
+                    string.Equals(
+                        diagnostic.Severity,
+                        "error",
+                        StringComparison.OrdinalIgnoreCase));
+            var unsupportedStep = preview.UnsupportedSteps
+                .OrderBy(step => step.OrderIndex)
+                .FirstOrDefault();
+            var message = firstError is not null
+                ? $"Line {firstError.Line}: {firstError.Message}"
+                : unsupportedStep is not null
+                    ? $"Step {unsupportedStep.OrderIndex} '{unsupportedStep.Label}' " +
+                      $"({unsupportedStep.StepType}): {unsupportedStep.Reason}"
+                    : "The LUA file does not contain an executable robot program.";
 
-            throw new InvalidOperationException(
-                firstError?.Message ?? "The LUA file does not contain any valid robot program steps.");
+            throw new InvalidOperationException(message);
         }
 
         return await _robotProgramService.CreateAsync(

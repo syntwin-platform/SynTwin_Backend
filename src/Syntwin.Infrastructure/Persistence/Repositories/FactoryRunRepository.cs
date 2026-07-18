@@ -27,9 +27,28 @@ public sealed class FactoryRunRepository : IFactoryRunRepository
                 .ThenInclude(target => target.PrepareCommand)
             .Include(factoryRun => factoryRun.Targets)
                 .ThenInclude(target => target.Command)
+            .Include(factoryRun => factoryRun.Targets)
+                .ThenInclude(target => target.CancelCommand)
             .AsSplitQuery()
             .FirstOrDefaultAsync(
                 factoryRun => factoryRun.Id == factoryRunId,
+                cancellationToken);
+    }
+
+    public Task<FactoryRun?> GetByClientRequestIdAsync(
+        Guid userId,
+        Guid clientRequestId,
+        CancellationToken cancellationToken = default)
+    {
+        return _dbContext.FactoryRuns
+            .Include(factoryRun => factoryRun.Programs)
+            .Include(factoryRun => factoryRun.Targets)
+                .ThenInclude(target => target.FactoryRunProgram)
+            .AsSplitQuery()
+            .FirstOrDefaultAsync(
+                factoryRun =>
+                    factoryRun.CreatedByUserId == userId &&
+                    factoryRun.ClientRequestId == clientRequestId,
                 cancellationToken);
     }
 
@@ -43,6 +62,8 @@ public sealed class FactoryRunRepository : IFactoryRunRepository
                 .ThenInclude(target => target.PrepareCommand)
             .Include(factoryRun => factoryRun.Targets)
                 .ThenInclude(target => target.Command)
+            .Include(factoryRun => factoryRun.Targets)
+                .ThenInclude(target => target.CancelCommand)
             .Include(factoryRun => factoryRun.Targets)
                 .ThenInclude(target => target.Program)
                     .ThenInclude(program => program!.Steps)

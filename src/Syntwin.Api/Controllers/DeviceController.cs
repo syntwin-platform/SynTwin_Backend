@@ -206,7 +206,7 @@ public sealed class DeviceController : ControllerBase
                 {
                     return Unauthorized(new
                     {
-                        message =   
+                        message =
                             "Device session token is required. " +
                             "Create a session with POST /api/device/session."
                     });

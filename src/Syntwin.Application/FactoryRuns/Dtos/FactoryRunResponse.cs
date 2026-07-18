@@ -8,6 +8,8 @@ public sealed class FactoryRunResponse
 
     public Guid CreatedByUserId { get; set; }
 
+    public Guid? ClientRequestId { get; set; }
+
     public string Status { get; set; } = string.Empty;
 
     public string CoordinationMode { get; set; } = string.Empty;

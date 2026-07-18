@@ -16,4 +16,10 @@ public sealed class LuaParsePreviewResponse
     public List<LuaParseDiagnostic> Diagnostics { get; set; } = new();
 
     public CreateRobotProgramRequest? CreateProgramRequest { get; set; }
+
+    public bool ExecutionReady { get; set; }
+
+    public string? CompiledProgramHash { get; set; }
+
+    public List<LuaUnsupportedStep> UnsupportedSteps { get; set; } = new();
 }

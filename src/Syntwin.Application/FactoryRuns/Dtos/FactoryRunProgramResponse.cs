@@ -14,5 +14,7 @@ public sealed class FactoryRunProgramResponse
 
     public string LuaContentHash { get; set; } = string.Empty;
 
+    public string? CompiledProgramHash { get; set; }
+
     public string? SyncPlanHash { get; set; }
 }

@@ -5,6 +5,8 @@ namespace Syntwin.Application.FactoryRuns.Dtos;
 
 public sealed class CreateFactoryRunRequest
 {
+    public Guid? ClientRequestId { get; set; }
+
     [Required]
     public Guid CompanyId { get; set; }
 

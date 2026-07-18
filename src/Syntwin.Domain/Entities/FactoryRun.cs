@@ -10,6 +10,10 @@ public sealed class FactoryRun
 
     public Guid CreatedByUserId { get; set; }
 
+    public Guid? ClientRequestId { get; set; }
+
+    public string? RequestHash { get; set; }
+
     public FactoryRunStatus Status { get; set; } = FactoryRunStatus.Created;
 
     public FactoryCoordinationMode CoordinationMode { get; set; } =
