@@ -53,4 +53,65 @@ public sealed class LuaExecutionContractTests
         Assert.Null(preview.CreateProgramRequest);
         Assert.Contains(preview.Diagnostics, diagnostic => diagnostic.Severity == "error");
     }
+
+    [Fact]
+    public void RecordedTraceMetadata_IsPreservedForMoveLExecution()
+    {
+        const string lua = """
+            -- @FAIROBOT_TRACE {"version":1,"groupId":"trace-a","sampleIndex":0,"sampleCount":2,"segmentDurationMs":0,"jointAngles":[0,-20,30,-40,-90,0]}
+            MoveJ({0, -20, 30, -40, -90, 0}, 0, 0, 30, 30, -1, -1)
+            -- @FAIROBOT_TRACE {"version":1,"groupId":"trace-a","sampleIndex":1,"sampleCount":2,"segmentDurationMs":42,"jointAngles":[1,-19,31,-39,-89,1]}
+            MoveL({100, 200, 300, 0, 90, 0}, 0, 0, 30, 30, -1, -1)
+            """;
+
+        var parsed = _parser.Parse(lua, "trace.lua");
+
+        Assert.Empty(parsed.Diagnostics);
+        Assert.Equal(2, parsed.Steps.Count);
+
+        var moveJTrace = parsed.Steps[0].Payload.GetProperty("trace");
+        Assert.Equal("trace-a", moveJTrace.GetProperty("groupId").GetString());
+        Assert.Equal(0, moveJTrace.GetProperty("sampleIndex").GetInt32());
+
+        var moveLPayload = parsed.Steps[1].Payload;
+        Assert.Equal(42, moveLPayload.GetProperty("trace").GetProperty("segmentDurationMs").GetDouble());
+        Assert.Equal(
+            new[] { 1d, -19d, 31d, -39d, -89d, 1d },
+            moveLPayload.GetProperty("recordedJointAngles")
+                .EnumerateArray()
+                .Select(value => value.GetDouble())
+                .ToArray());
+    }
+
+    [Fact]
+    public void MalformedRecordedTraceMetadata_IsRejected()
+    {
+        const string lua = """
+            -- @FAIROBOT_TRACE {"version":1,"groupId":"trace-a","sampleIndex":1,"sampleCount":2,"segmentDurationMs":42,"jointAngles":[1,2]}
+            MoveL({100, 200, 300, 0, 90, 0}, 0, 0, 30, 30, -1, -1)
+            """;
+
+        var preview = _mapper.ToPreviewResponse(_parser.Parse(lua, "invalid-trace.lua"));
+
+        Assert.False(preview.ExecutionReady);
+        Assert.Contains(preview.Diagnostics, diagnostic =>
+            diagnostic.Severity == "error" &&
+            diagnostic.Message.Contains("@FAIROBOT_TRACE", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void SingleSegmentRecordedTraceMetadata_IsAccepted()
+    {
+        const string lua = """
+            -- @FAIROBOT_TRACE {"version":1,"groupId":"trace-single","sampleIndex":0,"sampleCount":1,"segmentDurationMs":42,"jointAngles":[1,-19,31,-39,-89,1]}
+            MoveL({100, 200, 300, 0, 90, 0}, 0, 0, 30, 30, -1, -1)
+            """;
+
+        var parsed = _parser.Parse(lua, "single-trace.lua");
+        var preview = _mapper.ToPreviewResponse(parsed);
+
+        Assert.Empty(parsed.Diagnostics);
+        Assert.True(preview.ExecutionReady);
+        Assert.Single(parsed.Steps);
+    }
 }

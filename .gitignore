@@ -21,3 +21,5 @@ Thumbs.db
 # Local runtime recovery artifacts
 redis-backup/
 /tabilize factory run synchronization and robot isolation*
+# Local verification and publish output
+/artifacts/

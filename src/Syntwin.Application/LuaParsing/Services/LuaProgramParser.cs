@@ -1,4 +1,5 @@
 ﻿using System.Globalization;
+using System.Text.Json;
 using System.Text.RegularExpressions;
 using Syntwin.Application.LuaParsing.Interfaces;
 using Syntwin.Application.LuaParsing.Models;
@@ -30,6 +31,7 @@ public sealed class LuaProgramParser : ILuaProgramParser
         var insideIgnoredFunction = false;
         var gripperHint = false;
         var hasSeenWorkflowCommand = false;
+        LuaTraceMetadata? currentTraceMetadata = null;
 
         for (var index = 0; index < lines.Length; index++)
         {
@@ -45,6 +47,17 @@ public sealed class LuaProgramParser : ILuaProgramParser
             if (projectMatch.Success)
             {
                 result.Metadata.ProjectName = projectMatch.Groups[1].Value.Trim();
+                continue;
+            }
+
+            var traceMetadataMatch = TraceMetadataRegex.Match(line);
+            if (traceMetadataMatch.Success)
+            {
+                if (!TryParseTraceMetadata(traceMetadataMatch.Groups[1].Value, out currentTraceMetadata))
+                {
+                    AddError(result, index, "Invalid @FAIROBOT_TRACE metadata.", source);
+                }
+
                 continue;
             }
 
@@ -280,17 +293,21 @@ public sealed class LuaProgramParser : ILuaProgramParser
                     "MoveJ",
                     currentLabel.Length > 0 ? currentLabel : "MoveJ",
                     currentComment,
-                    new
-                    {
-                        jointAngles = joints,
-                        speed,
-                        acc
-                    },
+                    MergeTraceMetadata(
+                        new
+                        {
+                            jointAngles = joints,
+                            speed,
+                            acc
+                        },
+                        currentTraceMetadata,
+                        includeRecordedJointAngles: false),
                     normalizedLine);
 
                 currentLabel = string.Empty;
                 currentComment = string.Empty;
                 gripperHint = false;
+                currentTraceMetadata = null;
                 continue;
             }
 
@@ -417,25 +434,29 @@ public sealed class LuaProgramParser : ILuaProgramParser
                     "MoveL",
                     currentLabel.Length > 0 ? currentLabel : "MoveL",
                     currentComment,
-                    new
-                    {
-                        tcpPose = new
+                    MergeTraceMetadata(
+                        new
                         {
-                            x = pose[0],
-                            y = pose[1],
-                            z = pose[2],
-                            rx = pose[3],
-                            ry = pose[4],
-                            rz = pose[5]
+                            tcpPose = new
+                            {
+                                x = pose[0],
+                                y = pose[1],
+                                z = pose[2],
+                                rx = pose[3],
+                                ry = pose[4],
+                                rz = pose[5]
+                            },
+                            speed,
+                            acc
                         },
-                        speed,
-                        acc
-                    },
+                        currentTraceMetadata,
+                        includeRecordedJointAngles: true),
                     normalizedLine);
 
                 currentLabel = string.Empty;
                 currentComment = string.Empty;
                 gripperHint = false;
+                currentTraceMetadata = null;
                 continue;
             }
 
@@ -733,6 +754,111 @@ public sealed class LuaProgramParser : ILuaProgramParser
         return value.HasValue && value.Value >= 1 && value.Value <= 100;
     }
 
+    private static bool TryParseTraceMetadata(
+        string json,
+        out LuaTraceMetadata? metadata)
+    {
+        metadata = null;
+
+        try
+        {
+            using var document = JsonDocument.Parse(json);
+            var root = document.RootElement;
+
+            if (root.ValueKind != JsonValueKind.Object ||
+                !root.TryGetProperty("version", out var version) ||
+                !version.TryGetInt32(out var versionValue) ||
+                versionValue != 1 ||
+                !root.TryGetProperty("groupId", out var groupIdElement) ||
+                groupIdElement.ValueKind != JsonValueKind.String ||
+                string.IsNullOrWhiteSpace(groupIdElement.GetString()) ||
+                !root.TryGetProperty("sampleIndex", out var sampleIndexElement) ||
+                !sampleIndexElement.TryGetInt32(out var sampleIndex) ||
+                !root.TryGetProperty("sampleCount", out var sampleCountElement) ||
+                !sampleCountElement.TryGetInt32(out var sampleCount) ||
+                sampleIndex < 0 ||
+                sampleCount < 1 ||
+                sampleIndex >= sampleCount ||
+                !root.TryGetProperty("segmentDurationMs", out var durationElement) ||
+                !durationElement.TryGetDouble(out var segmentDurationMs) ||
+                !double.IsFinite(segmentDurationMs) ||
+                segmentDurationMs < 0 ||
+                !root.TryGetProperty("jointAngles", out var jointAnglesElement) ||
+                jointAnglesElement.ValueKind != JsonValueKind.Array ||
+                jointAnglesElement.GetArrayLength() != 6)
+            {
+                return false;
+            }
+
+            var jointAngles = new double[6];
+            var jointIndex = 0;
+
+            foreach (var jointAngleElement in jointAnglesElement.EnumerateArray())
+            {
+                if (!jointAngleElement.TryGetDouble(out var jointAngle) || !double.IsFinite(jointAngle))
+                {
+                    return false;
+                }
+
+                jointAngles[jointIndex++] = jointAngle;
+            }
+
+            metadata = new LuaTraceMetadata(
+                groupIdElement.GetString()!.Trim(),
+                sampleIndex,
+                sampleCount,
+                segmentDurationMs,
+                jointAngles);
+
+            return true;
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+    }
+
+    private static object MergeTraceMetadata(
+        object payload,
+        LuaTraceMetadata? metadata,
+        bool includeRecordedJointAngles)
+    {
+        if (metadata is null)
+        {
+            return payload;
+        }
+
+        var json = JsonSerializer.SerializeToElement(payload);
+        var values = new Dictionary<string, object?>();
+
+        foreach (var property in json.EnumerateObject())
+        {
+            values[property.Name] = property.Value.Clone();
+        }
+
+        values["trace"] = new
+        {
+            groupId = metadata.GroupId,
+            sampleIndex = metadata.SampleIndex,
+            sampleCount = metadata.SampleCount,
+            segmentDurationMs = metadata.SegmentDurationMs
+        };
+
+        if (includeRecordedJointAngles)
+        {
+            values["recordedJointAngles"] = metadata.JointAngles;
+        }
+
+        return values;
+    }
+
+    private sealed record LuaTraceMetadata(
+        string GroupId,
+        int SampleIndex,
+        int SampleCount,
+        double SegmentDurationMs,
+        double[] JointAngles);
+
     private static void AddStep(
         LuaParseResult result,
         string stepType,
@@ -1022,6 +1148,10 @@ public sealed class LuaProgramParser : ILuaProgramParser
     private static readonly Regex ProjectNameRegex = new(
         """^--\s*Project Name\s*:\s*(.+)$""",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    private static readonly Regex TraceMetadataRegex = new(
+        """^--\s*@FAIROBOT_TRACE\s+(.+)$""",
+        RegexOptions.Compiled);
 
     private static readonly Regex StepLabelRegex = new(
         """^--\s*\[[^\]]*\d+\]\s*(.+)$""",
