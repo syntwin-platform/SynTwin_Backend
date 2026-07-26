@@ -325,7 +325,7 @@ public sealed class SyntwinDbContext : DbContext
                     Code = SubscriptionPlanCode.Premium,
                     Name = "Premium",
                     MonthlyPrice = 299000,
-                    MaxRobots = 10,
+                    MaxRobots = 30,
                     CanView3D = true,
                     CanSendCommand = true,
                     AuditRetentionDays = 365,

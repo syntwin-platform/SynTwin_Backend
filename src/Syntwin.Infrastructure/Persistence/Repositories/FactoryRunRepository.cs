@@ -88,6 +88,57 @@ public sealed class FactoryRunRepository : IFactoryRunRepository
                 cancellationToken);
     }
 
+    public Task<FactoryRun?> GetByIdForStatusAsync(
+        Guid factoryRunId,
+        CancellationToken cancellationToken = default)
+    {
+        return _dbContext.FactoryRuns
+            .Include(factoryRun => factoryRun.Targets)
+                .ThenInclude(target => target.PrepareCommand)
+            .Include(factoryRun => factoryRun.Targets)
+                .ThenInclude(target => target.Command)
+            .Include(factoryRun => factoryRun.Targets)
+                .ThenInclude(target => target.CancelCommand)
+            .AsSplitQuery()
+            .FirstOrDefaultAsync(
+                factoryRun => factoryRun.Id == factoryRunId,
+                cancellationToken);
+    }
+
+    public Task<FactoryRunTarget?> GetTargetForArmAsync(
+        Guid factoryRunId,
+        Guid targetId,
+        CancellationToken cancellationToken = default)
+    {
+        return _dbContext.FactoryRunTargets
+            .Include(target => target.FactoryRun)
+            .Include(target => target.FactoryRunProgram)
+            .FirstOrDefaultAsync(
+                target =>
+                    target.FactoryRunId == factoryRunId &&
+                    target.Id == targetId,
+                cancellationToken);
+    }
+
+    public Task<int> CountArmParticipantsAsync(
+        Guid factoryRunId,
+        bool excludeFailedOrCancelled,
+        CancellationToken cancellationToken = default)
+    {
+        var query = _dbContext.FactoryRunTargets
+            .AsNoTracking()
+            .Where(target => target.FactoryRunId == factoryRunId);
+
+        if (excludeFailedOrCancelled)
+        {
+            query = query.Where(target =>
+                target.Status != FactoryRunTargetStatus.Failed &&
+                target.Status != FactoryRunTargetStatus.Cancelled);
+        }
+
+        return query.CountAsync(cancellationToken);
+    }
+
     public Task<FactoryRunTarget?> GetTargetByPrepareCommandIdAsync(
         Guid prepareCommandId,
         CancellationToken cancellationToken = default)

@@ -49,6 +49,14 @@ CancellationToken cancellationToken = default);
     string? ipAddress = null,
     CancellationToken cancellationToken = default);
 
+    Task<DeviceFactoryRunProgramArtifactResult>
+    GetFactoryRunProgramArtifactWithSessionAsync(
+        string accessToken,
+        Guid factoryRunId,
+        Guid targetId,
+        string? ipAddress = null,
+        CancellationToken cancellationToken = default);
+
     Task<DeviceFactoryRunStartedSubmitResult>
     ReportFactoryRunStartedWithSessionAsync(
         string accessToken,

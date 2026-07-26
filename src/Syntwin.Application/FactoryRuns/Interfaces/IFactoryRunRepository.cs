@@ -10,6 +10,10 @@ public interface IFactoryRunRepository
         Guid factoryRunId,
         CancellationToken cancellationToken = default);
 
+    Task<FactoryRun?> GetByIdForStatusAsync(
+        Guid factoryRunId,
+        CancellationToken cancellationToken = default);
+
     Task<FactoryRun?> GetByClientRequestIdAsync(
         Guid userId,
         Guid clientRequestId,
@@ -22,6 +26,16 @@ public interface IFactoryRunRepository
     Task<FactoryRun?> GetByIdForArmAsync(
     Guid factoryRunId,
     CancellationToken cancellationToken = default);
+
+    Task<FactoryRunTarget?> GetTargetForArmAsync(
+        Guid factoryRunId,
+        Guid targetId,
+        CancellationToken cancellationToken = default);
+
+    Task<int> CountArmParticipantsAsync(
+        Guid factoryRunId,
+        bool excludeFailedOrCancelled,
+        CancellationToken cancellationToken = default);
 
     Task<FactoryRunTarget?> GetTargetByPrepareCommandIdAsync(
         Guid prepareCommandId,

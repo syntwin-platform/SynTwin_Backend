@@ -32,7 +32,7 @@ public sealed class ScopedFactoryRunProgramPreparationExecutor
             return Array.Empty<FactoryRunPreparedProgram>();
         }
 
-        var boundedConcurrency = Math.Clamp(maxConcurrency, 1, 4);
+        var boundedConcurrency = Math.Clamp(maxConcurrency, 1, 12);
         using var gate = new SemaphoreSlim(
             boundedConcurrency,
             boundedConcurrency);

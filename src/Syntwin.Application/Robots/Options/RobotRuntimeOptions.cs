@@ -28,6 +28,22 @@ public sealed class RobotRuntimeOptions
 
     public int FactoryRunLockMaintenanceIntervalSeconds { get; set; } = 30;
 
+    public bool FactoryRunBarrierV2Enabled { get; set; } = true;
+
+    public int FactoryRunBarrierTtlSeconds { get; set; } = 900;
+
+    public int FactoryRunBarrierSealLeaseSeconds { get; set; } = 30;
+
+    public int FactoryRunProgramPreparationMaxConcurrency { get; set; } = 6;
+
+    public int FactoryRunStartPropagationBaseMilliseconds { get; set; } = 750;
+
+    public int FactoryRunStartPropagationPerTargetMilliseconds { get; set; } = 50;
+
+    public int FactoryRunStartArmSpreadContributionMaxMilliseconds { get; set; } = 1000;
+
+    public int FactoryRunStartLeadTimeMaxMilliseconds { get; set; } = 5000;
+
     public int PendingCommandPollIntervalMilliseconds { get; set; } = 250;
 
     public int PendingCommandMaxWaitSeconds { get; set; } = 25;

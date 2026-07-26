@@ -32,4 +32,9 @@ public interface IFactoryRunService
         Guid userId,
         Guid factoryRunId,
         CancellationToken cancellationToken = default);
+
+    Task<FactoryRunStatusResponse?> GetStatusAsync(
+        Guid userId,
+        Guid factoryRunId,
+        CancellationToken cancellationToken = default);
 }

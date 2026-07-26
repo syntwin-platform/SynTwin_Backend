@@ -95,6 +95,42 @@ public sealed class FactoryRunApiDatabaseIntegrationTests(FactoryRunApiFixture f
     }
 
     [Fact]
+    public async Task ThirtyIndependentTargets_CreateDistinctSnapshotsWithoutDroppingTargets()
+    {
+        await fixture.ResetAsync();
+        var assignments = Enumerable.Range(1, 30)
+            .Select(index => (
+                Key: $"program-{index}",
+                Lua: $"WaitMs({index})",
+                RobotId: FactoryRunApiFixture.GetRobotId(index)))
+            .ToArray();
+
+        var response = await fixture.Client.PostAsJsonAsync(
+            "/api/factory-runs",
+            CreatePerTargetRequest(assignments));
+        var run = await ReadRunAsync(response, HttpStatusCode.Created);
+
+        Assert.Equal(30, run.Programs.Count);
+        Assert.Equal(30, run.Targets.Count);
+        Assert.Equal(
+            30,
+            run.Targets
+                .Select(target => target.FactoryRunProgramId)
+                .Distinct()
+                .Count());
+
+        var persisted = await fixture.WithDbContextAsync(async db => new
+        {
+            Programs = await db.FactoryRunPrograms
+                .CountAsync(program => program.FactoryRunId == run.Id),
+            Targets = await db.FactoryRunTargets
+                .CountAsync(target => target.FactoryRunId == run.Id)
+        });
+        Assert.Equal(30, persisted.Programs);
+        Assert.Equal(30, persisted.Targets);
+    }
+
+    [Fact]
     public async Task RetriedCreateWithSameClientRequestId_IsIdempotent()
     {
         await fixture.ResetAsync();
