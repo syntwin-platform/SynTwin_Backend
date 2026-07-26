@@ -233,6 +233,31 @@ public sealed class FactoryRunsController : ControllerBase
             : Ok(response);
     }
 
+    [HttpGet("{id:guid}/status")]
+    [ProducesResponseType(typeof(FactoryRunStatusResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<FactoryRunStatusResponse>> GetStatus(
+        Guid id,
+        CancellationToken cancellationToken)
+    {
+        var userId = GetCurrentUserId();
+
+        if (userId is null)
+        {
+            return Unauthorized(new { message = "Invalid access token." });
+        }
+
+        var response = await _factoryRunService.GetStatusAsync(
+            userId.Value,
+            id,
+            cancellationToken);
+
+        return response is null
+            ? NotFound(new { message = "Factory run not found." })
+            : Ok(response);
+    }
+
     private Guid? GetCurrentUserId()
     {
         var value = User.FindFirstValue(ClaimTypes.NameIdentifier);

@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Syntwin.Application.Devices.Dtos;
 using Syntwin.Application.Devices.Interfaces;
+using Syntwin.Application.FactoryRuns.Exceptions;
 using Microsoft.Extensions.Options;
 using Syntwin.Application.Robots.Options;
 
@@ -263,6 +264,7 @@ public sealed class DeviceController : ControllerBase
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status503ServiceUnavailable)]
     public async Task<IActionResult> ArmFactoryRun(
     [FromHeader(Name = "Authorization")] string? authorization,
     [FromBody] DeviceFactoryRunArmRequest request,
@@ -295,6 +297,79 @@ public sealed class DeviceController : ControllerBase
             }
 
             return Ok(result.Response);
+        }
+        catch (FactoryRunBarrierBusyException exception)
+        {
+            const int retryAfterMs = 250;
+            Response.Headers["Retry-After"] = "1";
+
+            return StatusCode(
+                StatusCodes.Status503ServiceUnavailable,
+                new
+                {
+                    message = exception.Message,
+                    errorCode = "factory_run_arm_busy",
+                    retryable = true,
+                    retryAfterMs
+                });
+        }
+        catch (InvalidOperationException exception)
+        {
+            return BadRequest(new { message = exception.Message });
+        }
+    }
+
+    [HttpGet(
+        "factory-runs/{factoryRunId:guid}/targets/{targetId:guid}/program-artifact")]
+    [ProducesResponseType(
+        typeof(DeviceFactoryRunProgramArtifactResponse),
+        StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    public async Task<IActionResult> GetFactoryRunProgramArtifact(
+        Guid factoryRunId,
+        Guid targetId,
+        [FromHeader(Name = "Authorization")] string? authorization,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            if (!TryReadBearerToken(authorization, out var accessToken))
+            {
+                return Unauthorized(new
+                {
+                    message =
+                        "Device session token is required. " +
+                        "Create a session with POST /api/device/session."
+                });
+            }
+
+            var result =
+                await _deviceGatewayService
+                    .GetFactoryRunProgramArtifactWithSessionAsync(
+                        accessToken,
+                        factoryRunId,
+                        targetId,
+                        GetClientIpAddress(),
+                        cancellationToken);
+
+            if (!result.IsAuthenticated)
+            {
+                return Unauthorized(new
+                {
+                    message = "Invalid device session."
+                });
+            }
+
+            if (result.IsDisabled)
+            {
+                return StatusCode(
+                    StatusCodes.Status403Forbidden,
+                    new { message = "Robot is disabled." });
+            }
+
+            return Ok(result.Artifact);
         }
         catch (InvalidOperationException exception)
         {

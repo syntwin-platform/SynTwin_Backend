@@ -24,8 +24,8 @@ public sealed class FactoryRunService : IFactoryRunService
 {
     private const int MaxLuaContentBytes = 1024 * 1024;
     private const int MaxTotalLuaContentBytes = 5 * 1024 * 1024;
-    private const int MaxProgramCount = 20;
-    private const int MaxTargetCount = 20;
+    private const int MaxProgramCount = 30;
+    private const int MaxTargetCount = 30;
     private static readonly TimeSpan DefaultCommandTimeout = TimeSpan.FromMinutes(5);
     private readonly IFactoryRunRepository _factoryRunRepository;
     private readonly ICompanyRepository _companyRepository;
@@ -44,6 +44,7 @@ public sealed class FactoryRunService : IFactoryRunService
     private readonly FactoryRunExecutionStrategyResolver _executionStrategyResolver;
     private readonly TimeSpan _factoryRunBusyLockTtl;
     private readonly TimeSpan _factoryRunOperationLockTtl;
+    private readonly int _factoryRunProgramPreparationMaxConcurrency;
 
 
     public FactoryRunService(
@@ -85,6 +86,10 @@ public sealed class FactoryRunService : IFactoryRunService
         _factoryRunOperationLockTtl = TimeSpan.FromSeconds(Math.Max(
             120,
             runtimeOptions.Value.FactoryRunBusyLockTtlSeconds));
+        _factoryRunProgramPreparationMaxConcurrency = Math.Clamp(
+            runtimeOptions.Value.FactoryRunProgramPreparationMaxConcurrency,
+            1,
+            12);
     }
 
     public async Task<FactoryRunResponse?> CreateAsync(
@@ -374,9 +379,11 @@ public sealed class FactoryRunService : IFactoryRunService
             var preparationItems = new List<FactoryRunProgramPreparationItem>(
                 orderedTargets.Count);
             var preflightFailures = new Dictionary<Guid, string>();
+            var sharedArtifactTargetIds = new HashSet<Guid>();
 
-            // Parse once per deduplicated source Lua, then clone the resulting
-            // program request for every target assigned to that source.
+            // New FactoryRun rows already own one immutable compiled artifact per
+            // deduplicated source Lua. Keep the older create/publish-per-robot path
+            // only for legacy rows that do not have that artifact.
             foreach (var sourceGroup in orderedTargets.GroupBy(target =>
                 target.FactoryRunProgramId ?? Guid.Empty))
             {
@@ -441,6 +448,18 @@ public sealed class FactoryRunService : IFactoryRunService
                     continue;
                 }
 
+                if (sourceProgram is not null &&
+                    !string.IsNullOrWhiteSpace(sourceProgram.CompiledProgramJson) &&
+                    !string.IsNullOrWhiteSpace(sourceProgram.CompiledProgramHash))
+                {
+                    foreach (var target in sourceGroup)
+                    {
+                        sharedArtifactTargetIds.Add(target.Id);
+                    }
+
+                    continue;
+                }
+
                 foreach (var target in sourceGroup)
                 {
                     preparationItems.Add(new FactoryRunProgramPreparationItem
@@ -452,13 +471,15 @@ public sealed class FactoryRunService : IFactoryRunService
                 }
             }
 
-            var preparationResults =
-                await _programPreparationExecutor.CreateAndPublishManyAsync(
-                    userId,
-                    preparationItems,
-                    ipAddress,
-                    maxConcurrency: 3,
-                    cancellationToken: durableOperationToken);
+            IReadOnlyList<FactoryRunPreparedProgram> preparationResults =
+                preparationItems.Count == 0
+                    ? Array.Empty<FactoryRunPreparedProgram>()
+                    : await _programPreparationExecutor.CreateAndPublishManyAsync(
+                        userId,
+                        preparationItems,
+                        ipAddress,
+                        maxConcurrency: _factoryRunProgramPreparationMaxConcurrency,
+                        cancellationToken: durableOperationToken);
 
             var preparationResultsByRobotId = preparationResults
                 .ToDictionary(result => result.RobotId);
@@ -475,12 +496,25 @@ public sealed class FactoryRunService : IFactoryRunService
             }
 
             var preparedPrograms =
-                new List<(FactoryRunTarget Target, RobotProgramResponse Program)>(
+                new List<(FactoryRunTarget Target, RobotProgramResponse? Program)>(
                     orderedTargets.Count);
             var isolatedPreparationLocks = new List<(Guid RobotId, Guid OwnerId)>();
 
             foreach (var target in orderedTargets)
             {
+                if (sharedArtifactTargetIds.Contains(target.Id))
+                {
+                    target.ProgramId = null;
+                    target.Status = FactoryRunTargetStatus.Prepared;
+                    target.PreparedAtUtc = DateTimeOffset.UtcNow;
+                    target.ReadinessError = null;
+                    target.FailureReason = null;
+                    target.UpdatedAtUtc = DateTimeOffset.UtcNow;
+
+                    preparedPrograms.Add((target, null));
+                    continue;
+                }
+
                 if (!preparationResultsByRobotId.TryGetValue(
                         target.RobotId,
                         out var result))
@@ -549,13 +583,22 @@ public sealed class FactoryRunService : IFactoryRunService
 
             foreach (var (target, publishedProgram) in preparedPrograms)
             {
-                var prepareCommand = CreateFactoryRunPrepareCommand(
-                    userId,
-                    target.RobotId,
-                    factoryRun.Id,
-                    target.Id,
-                    publishedProgram.Id,
-                    publishedProgram.Name);
+                var prepareCommand = publishedProgram is not null
+                    ? CreateFactoryRunPrepareCommand(
+                        userId,
+                        target.RobotId,
+                        factoryRun.Id,
+                        target.Id,
+                        publishedProgram.Id,
+                        publishedProgram.Name)
+                    : CreateFactoryRunArtifactPrepareCommand(
+                        userId,
+                        target.RobotId,
+                        factoryRun.Id,
+                        target.Id,
+                        target.FactoryRunProgram
+                        ?? throw new InvalidOperationException(
+                            "Factory run target has no compiled program artifact."));
 
                 target.PrepareCommandId = prepareCommand.Id;
                 target.Status = FactoryRunTargetStatus.WaitingForDeviceReady;
@@ -749,7 +792,8 @@ public sealed class FactoryRunService : IFactoryRunService
             .OrderBy(target => target.CreatedAtUtc)
             .Select(target =>
             {
-                if (!target.ProgramId.HasValue)
+                if (!target.ProgramId.HasValue &&
+                    !HasSharedCompiledArtifact(target))
                 {
                     throw new InvalidOperationException(
                         "Factory run target has no prepared program.");
@@ -1147,6 +1191,31 @@ public sealed class FactoryRunService : IFactoryRunService
         }
 
         return ToResponse(factoryRun);
+    }
+
+    public async Task<FactoryRunStatusResponse?> GetStatusAsync(
+        Guid userId,
+        Guid factoryRunId,
+        CancellationToken cancellationToken = default)
+    {
+        var factoryRun = await _factoryRunRepository.GetByIdForStatusAsync(
+            factoryRunId,
+            cancellationToken);
+
+        if (factoryRun is null ||
+            !await HasCompanyAccessAsync(userId, factoryRun.CompanyId, cancellationToken))
+        {
+            return null;
+        }
+
+        var statusBeforeRefresh = factoryRun.Status;
+
+        if (await RefreshFromCommandsAsync(factoryRun, cancellationToken))
+        {
+            RecordFactoryRunOutcomeTransition(statusBeforeRefresh, factoryRun);
+        }
+
+        return ToStatusResponse(factoryRun);
     }
 
     private async Task<FactoryRun?> GetAuthorizedFactoryRunAsync(
@@ -1847,6 +1916,49 @@ public sealed class FactoryRunService : IFactoryRunService
         };
     }
 
+    private static RobotCommand CreateFactoryRunArtifactPrepareCommand(
+        Guid userId,
+        Guid robotId,
+        Guid factoryRunId,
+        Guid targetId,
+        FactoryRunProgram artifact)
+    {
+        if (!HasSharedCompiledArtifact(artifact))
+        {
+            throw new InvalidOperationException(
+                "The FactoryRun compiled program snapshot is incomplete.");
+        }
+
+        var now = DateTimeOffset.UtcNow;
+
+        return new RobotCommand
+        {
+            Id = FactoryRunOperationIdentity.CreateCommandId(
+                factoryRunId,
+                targetId,
+                "prepare"),
+            RobotId = robotId,
+            UserId = userId,
+            CommandType = RobotCommandType.PrepareProgram,
+            PayloadJson = JsonSerializer.Serialize(new
+            {
+                factoryRunId,
+                targetId,
+                programName = artifact.ProgramName,
+                artifact = new
+                {
+                    contractVersion = 1,
+                    factoryRunProgramId = artifact.Id,
+                    compiledProgramHash = artifact.CompiledProgramHash
+                },
+                requestedAtUtc = now
+            }),
+            Status = CommandStatus.Pending,
+            CreatedAt = now,
+            TimeoutAt = now.Add(DefaultCommandTimeout)
+        };
+    }
+
 
     private async Task<int> DispatchIndependentCommandsAsync(
         FactoryRun factoryRun,
@@ -1943,6 +2055,30 @@ public sealed class FactoryRunService : IFactoryRunService
         FactoryFailurePolicy failurePolicy,
         DateTimeOffset? scheduledStartAtUtc)
     {
+        if (target.FactoryRunProgram is { } artifact &&
+            HasSharedCompiledArtifact(artifact))
+        {
+            return JsonSerializer.Serialize(new
+            {
+                factoryRunId,
+                targetId = target.Id,
+                coordinationMode = coordinationMode.ToString(),
+                syncMode = coordinationMode == FactoryCoordinationMode.Synchronized
+                    ? "Barrier"
+                    : "Independent",
+                failurePolicy = failurePolicy.ToString(),
+                programName = artifact.ProgramName,
+                snapshottedAt = DateTimeOffset.UtcNow,
+                scheduledStartAtUtc,
+                artifact = new
+                {
+                    contractVersion = 1,
+                    factoryRunProgramId = artifact.Id,
+                    compiledProgramHash = artifact.CompiledProgramHash
+                }
+            });
+        }
+
         var program = target.Program;
 
         if (program is null)
@@ -1993,6 +2129,18 @@ public sealed class FactoryRunService : IFactoryRunService
         };
 
         return JsonSerializer.Serialize(snapshot);
+    }
+
+    private static bool HasSharedCompiledArtifact(FactoryRunTarget target)
+    {
+        return target.FactoryRunProgram is { } artifact &&
+               HasSharedCompiledArtifact(artifact);
+    }
+
+    private static bool HasSharedCompiledArtifact(FactoryRunProgram artifact)
+    {
+        return !string.IsNullOrWhiteSpace(artifact.CompiledProgramJson) &&
+               !string.IsNullOrWhiteSpace(artifact.CompiledProgramHash);
     }
 
     private static CreateRobotProgramRequest CloneCreateProgramRequest(
@@ -2292,6 +2440,30 @@ public sealed class FactoryRunService : IFactoryRunService
             StartLateByMs = target.StartLateByMs,
             CompletedAtUtc = target.CompletedAtUtc,
             FailureReason = target.FailureReason
+        };
+    }
+
+    private static FactoryRunStatusResponse ToStatusResponse(FactoryRun factoryRun)
+    {
+        return new FactoryRunStatusResponse
+        {
+            Id = factoryRun.Id,
+            Status = factoryRun.Status.ToString(),
+            CoordinationMode = factoryRun.CoordinationMode.ToString(),
+            FailurePolicy = factoryRun.FailurePolicy.ToString(),
+            TargetCount = factoryRun.TargetCount,
+            ScheduledStartAtUtc = factoryRun.ScheduledStartAtUtc,
+            PreparedAtUtc = factoryRun.PreparedAtUtc,
+            StartedAtUtc = factoryRun.StartedAtUtc,
+            ActualStartSkewMs = factoryRun.ActualStartSkewMs,
+            CompletedAtUtc = factoryRun.CompletedAtUtc,
+            CancelledAtUtc = factoryRun.CancelledAtUtc,
+            FailureReason = factoryRun.FailureReason,
+            UpdatedAtUtc = factoryRun.UpdatedAtUtc,
+            Targets = factoryRun.Targets
+                .OrderBy(target => target.CreatedAtUtc)
+                .Select(ToTargetResponse)
+                .ToList()
         };
     }
 

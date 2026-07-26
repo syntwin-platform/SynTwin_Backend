@@ -22,8 +22,8 @@ public sealed class FactoryRunApiFixture : IAsyncLifetime
 {
     public static readonly Guid UserId = Guid.Parse("10000000-0000-0000-0000-000000000001");
     public static readonly Guid CompanyId = Guid.Parse("20000000-0000-0000-0000-000000000001");
-    public static readonly Guid RobotOneId = Guid.Parse("30000000-0000-0000-0000-000000000001");
-    public static readonly Guid RobotTwoId = Guid.Parse("30000000-0000-0000-0000-000000000002");
+    public static readonly Guid RobotOneId = GetRobotId(1);
+    public static readonly Guid RobotTwoId = GetRobotId(2);
 
     private readonly MsSqlContainer _sql = new MsSqlBuilder(
             "mcr.microsoft.com/mssql/server:2022-CU20-ubuntu-22.04")
@@ -134,8 +134,10 @@ public sealed class FactoryRunApiFixture : IAsyncLifetime
             IsActive = true
         });
         dbContext.Robots.AddRange(
-            CreateRobot(RobotOneId, "Line 1"),
-            CreateRobot(RobotTwoId, "Line 2"));
+            Enumerable.Range(1, 30)
+                .Select(index => CreateRobot(
+                    GetRobotId(index),
+                    $"Line {index}")));
         await dbContext.SaveChangesAsync();
     }
 
@@ -165,6 +167,19 @@ public sealed class FactoryRunApiFixture : IAsyncLifetime
         Model = "Fairino FR5",
         Status = RobotStatus.Registered
     };
+
+    public static Guid GetRobotId(int index)
+    {
+        if (index is < 1 or > 30)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(index),
+                index,
+                "Integration robot index must be between 1 and 30.");
+        }
+
+        return Guid.Parse($"30000000-0000-0000-0000-{index:000000000000}");
+    }
 
     private string GetApplicationConnectionString()
     {
