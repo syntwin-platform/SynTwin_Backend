@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UserSecretsId>11442487-954b-4403-b244-5083319ed79c</UserSecretsId>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Syntwin.Hosting\Syntwin.Hosting.csproj" />
+    <ProjectReference Include="..\Syntwin.Infrastructure\Syntwin.Infrastructure.csproj" />
+  </ItemGroup>
+
+</Project>

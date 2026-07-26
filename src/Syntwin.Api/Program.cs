@@ -1,22 +1,50 @@
 using Microsoft.AspNetCore.Authentication.JwtBearer;
-using Microsoft.AspNetCore.Diagnostics.HealthChecks;
+using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
-using StackExchange.Redis;
-using Syntwin.Api.BackgroundServices;
-using Syntwin.Api.HealthChecks;
-using Syntwin.Api.Hubs;
-using Syntwin.Api.Realtime;
-using Syntwin.Application.Realtime.Interfaces;
+using Syntwin.Api.Middleware;
+using Syntwin.Hosting.Configuration;
+using Syntwin.Hosting.HealthChecks;
+using Syntwin.Hosting.Hubs;
+using Syntwin.Hosting.Realtime;
 using Syntwin.Infrastructure;
 using System.Text;
-using System.Text.Json;
 using System.Text.Json.Serialization;
 
 const string CorsPolicyName = "SyntwinCors";
 var builder = WebApplication.CreateBuilder(args);
+
+if (builder.Environment.IsProduction())
+{
+    builder.Logging.ClearProviders();
+    builder.Logging.AddJsonConsole(options =>
+    {
+        options.IncludeScopes = true;
+        options.TimestampFormat = "yyyy-MM-ddTHH:mm:ss.fffZ";
+        options.UseUtcTimestamp = true;
+    });
+}
+
+if (int.TryParse(builder.Configuration["PORT"], out var port))
+{
+    builder.WebHost.UseUrls($"http://0.0.0.0:{port}");
+}
+
+builder.Services.Configure<ForwardedHeadersOptions>(options =>
+{
+    options.ForwardedHeaders =
+        ForwardedHeaders.XForwardedFor |
+        ForwardedHeaders.XForwardedProto;
+    options.ForwardLimit = 1;
+
+    if (builder.Environment.IsProduction())
+    {
+        options.KnownNetworks.Clear();
+        options.KnownProxies.Clear();
+    }
+});
 
 // Add services to the container.
 
@@ -26,25 +54,8 @@ builder.Services
     {
         options.JsonSerializerOptions.Converters.Add(new JsonStringEnumConverter());
     });
-var redisConnectionString = builder.Configuration["Redis:ConnectionString"];
 
-if (string.IsNullOrWhiteSpace(redisConnectionString))
-{
-    throw new InvalidOperationException("Redis connection string is required.");
-}
-
-builder.Services
-    .AddSignalR()
-    .AddStackExchangeRedis(redisConnectionString, options =>
-    {
-        options.Configuration.ChannelPrefix = RedisChannel.Literal("syntwin:signalr");
-    });
-
-builder.Services.AddScoped<IRobotRealtimeNotifier, SignalRRobotRealtimeNotifier>();
-builder.Services.AddHostedService<RobotOfflineMonitorService>();
-builder.Services.AddHostedService<RobotCommandTimeoutMonitorService>();
-builder.Services.AddHostedService<FactoryRunLockMaintenanceService>();
-builder.Services.AddHostedService<RobotLastSeenFlushService>();
+builder.Services.AddSyntwinRealtime(builder.Configuration);
 
 var allowedOrigins = builder.Configuration
     .GetSection("Cors:AllowedOrigins")
@@ -120,18 +131,14 @@ builder.Services.AddSwaggerGen(options =>
     });
 });
 builder.Services.AddInfrastructure(builder.Configuration);
-builder.Services
-    .AddHealthChecks()
-    .AddCheck<SyntwinDbHealthCheck>("sqlserver")
-    .AddCheck<RedisHealthCheck>("redis")
-    .AddCheck<InfluxDbHealthCheck>("influxdb");
-var jwtSection = builder.Configuration.GetSection("Jwt");
-var signingKey = jwtSection["SigningKey"] ?? string.Empty;
-
+builder.Services.AddSyntwinDependencyHealthChecks();
 builder.Services
     .AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(options =>
     {
+        var jwtSection = builder.Configuration.GetSection("Jwt");
+        var signingKey = jwtSection["SigningKey"] ?? string.Empty;
+
         options.TokenValidationParameters = new TokenValidationParameters
         {
             ValidateIssuer = true,
@@ -181,13 +188,9 @@ builder.Services.AddRateLimiter(options =>
 });
 var app = builder.Build();
 
-using (var scope = app.Services.CreateScope())
-{
-    var dbContext = scope.ServiceProvider.GetRequiredService<Syntwin.Infrastructure.Persistence.SyntwinDbContext>();
-    await Microsoft.EntityFrameworkCore.RelationalDatabaseFacadeExtensions.MigrateAsync(dbContext.Database);
-}
-
-await app.Services.SeedSuperAdminAsync(app.Configuration);
+StartupConfigurationValidator.ValidateApi(
+    app.Configuration,
+    app.Environment);
 
 // Configure the HTTP request pipeline.
 var swaggerEnabled = app.Environment.IsDevelopment() ||
@@ -198,7 +201,16 @@ if (swaggerEnabled)
     app.UseSwagger();
     app.UseSwaggerUI();
 }
-app.UseHttpsRedirection();
+
+app.UseForwardedHeaders();
+
+if (app.Configuration.GetValue<bool>("Https:RedirectEnabled"))
+{
+    app.UseHttpsRedirection();
+}
+
+app.UseRouting();
+app.UseMiddleware<RequestLoggingScopeMiddleware>();
 app.UseCors(CorsPolicyName);
 
 app.UseAuthentication();
@@ -206,31 +218,7 @@ app.UseAuthorization();
 app.UseRateLimiter();
 app.MapControllers();
 app.MapHub<TelemetryHub>("/hubs/telemetry");
-app.MapHealthChecks("/health/live", new HealthCheckOptions
-{
-    Predicate = _ => false
-});
-
-app.MapHealthChecks("/health/ready", new HealthCheckOptions
-{
-    ResponseWriter = async (context, report) =>
-    {
-        context.Response.ContentType = "application/json";
-
-        var payload = new
-        {
-            status = report.Status.ToString(),
-            checks = report.Entries.Select(entry => new
-            {
-                name = entry.Key,
-                status = entry.Value.Status.ToString(),
-                description = entry.Value.Description
-            })
-        };
-
-        await context.Response.WriteAsync(JsonSerializer.Serialize(payload));
-    }
-});
+app.MapSyntwinHealthEndpoints();
 app.Run();
 
 // Exposes the top-level entry point to WebApplicationFactory without changing

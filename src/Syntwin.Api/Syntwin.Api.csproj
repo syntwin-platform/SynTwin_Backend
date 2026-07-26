@@ -9,7 +9,6 @@
 
   <ItemGroup>
     <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="9.*" />
-	<PackageReference Include="Microsoft.AspNetCore.SignalR.StackExchangeRedis" Version="9.*" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="9.*">
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
       <PrivateAssets>all</PrivateAssets>
@@ -19,6 +18,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Syntwin.Application\Syntwin.Application.csproj" />
+    <ProjectReference Include="..\Syntwin.Hosting\Syntwin.Hosting.csproj" />
     <ProjectReference Include="..\Syntwin.Infrastructure\Syntwin.Infrastructure.csproj" />
   </ItemGroup>
 

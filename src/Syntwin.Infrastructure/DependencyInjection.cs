@@ -43,6 +43,7 @@ using Syntwin.Infrastructure.Persistence;
 using Syntwin.Infrastructure.Robots;
 using Syntwin.Infrastructure.Telemetry;
 using Syntwin.Infrastructure.FactoryRuns;
+using Syntwin.Infrastructure.Configuration;
 
 namespace Syntwin.Infrastructure;
 
@@ -82,21 +83,12 @@ public static class DependencyInjection
             options.Locale = vnPaySection["Locale"] ?? options.Locale;
         });
 
-        services.AddDbContext<SyntwinDbContext>(options =>
-        {
-            options.UseSqlServer(
-                configuration.GetConnectionString("SyntwinDb"));
-        });
+        services.AddSyntwinPersistence(configuration);
         services.Configure<RobotRuntimeOptions>(configuration.GetSection("RobotRuntime"));
         services.Configure<InfluxDbOptions>(configuration.GetSection("InfluxDb"));
-        var redisConnectionString = configuration["Redis:ConnectionString"];
-
-        if (string.IsNullOrWhiteSpace(redisConnectionString))
-        {
-            throw new InvalidOperationException("Redis connection string is required.");
-        }
         services.AddSingleton<IConnectionMultiplexer>(
-    _ => ConnectionMultiplexer.Connect(redisConnectionString));
+            _ => ConnectionMultiplexer.Connect(
+                configuration.CreateSyntwinRedisOptions()));
 
         services.AddSingleton<IDistributedLock, RedisDistributedLock>();
         services.AddSingleton<IRobotRuntimeMetrics, RobotRuntimeMetrics>();

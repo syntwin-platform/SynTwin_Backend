@@ -7,6 +7,9 @@ Project chính:
 
 ```text
 Syntwin.Api
+Syntwin.Worker
+Syntwin.DbMigrator
+Syntwin.Hosting
 Syntwin.Application
 Syntwin.Domain
 Syntwin.Infrastructure
@@ -16,26 +19,63 @@ Syntwin.Infrastructure
 Luồng phụ thuộc chỉ được đi từ ngoài vào trong:
 
 ```text
-Syntwin.Api -> Syntwin.Application -> Syntwin.Domain
+Syntwin.Api -> Syntwin.Hosting
+Syntwin.Api -> Syntwin.Application
+Syntwin.Api -> Syntwin.Infrastructure chỉ để đăng ký DI/config
+Syntwin.Worker -> Syntwin.Hosting
+Syntwin.Worker -> Syntwin.Infrastructure
+Syntwin.DbMigrator -> Syntwin.Infrastructure
+Syntwin.Hosting -> Syntwin.Infrastructure
+Syntwin.Hosting -> Syntwin.Application
+Syntwin.Application -> Syntwin.Domain
 Syntwin.Infrastructure -> Syntwin.Application
 Syntwin.Infrastructure -> Syntwin.Domain
-Syntwin.Api -> Syntwin.Infrastructure chỉ để đăng ký DI/config
 ```
 
 ## Nhiệm vụ từng layer
 
 ### Syntwin.Api
-Chỉ chứa phần tiếp xúc HTTP/realtime:
+Chứa HTTP pipeline và public endpoints:
 
 - Controllers.
-- SignalR Hubs.
 - Middleware.
 - Swagger config.
 - Authentication/Authorization config.
 - CORS config.
-- Mapping endpoint.
+- Mapping controller, SignalR và health endpoints.
 
 Không chứa business logic dài.
+Không chạy migration, seed hoặc background monitor.
+
+### Syntwin.Worker
+Chứa các tác vụ nền chạy liên tục:
+
+- Robot offline monitor.
+- Robot command timeout monitor.
+- Factory Run lock maintenance.
+- Robot LastSeen flush.
+
+Worker dùng Redis distributed lock để nhiều replica không xử lý trùng.
+Worker không expose controller hoặc public SignalR hub.
+
+### Syntwin.DbMigrator
+Là one-shot process:
+
+- Apply EF Core migrations.
+- Seed dữ liệu hệ thống theo cách idempotent.
+- Thành công trả exit code `0`, lỗi trả exit code `1`.
+
+API và Worker không được tự chạy migration.
+
+### Syntwin.Hosting
+Chứa hosting adapters dùng chung giữa API và Worker:
+
+- SignalR Hub type và notifier implementation.
+- Redis SignalR backplane registration.
+- Dependency health checks.
+- Startup configuration validation.
+
+`Syntwin.Api` vẫn là process duy nhất map public SignalR endpoint.
 
 ### Syntwin.Application
 Chứa use case/service:
@@ -77,6 +117,11 @@ Chứa triển khai kỹ thuật:
 - Cấm để `TelemetryService` phụ thuộc MQTT/Isaac Sim trực tiếp.
 - Cấm tạo microservices mới trong MVP.
 - Cấm đổi architecture chính nếu không có lý do rõ ràng.
+- Cấm đưa migration hoặc bốn background monitor trở lại API startup.
+
+Ba executable host vẫn dùng chung Domain, Application, Infrastructure,
+SQL Server và Redis. Đây là modular monolith nhiều process, không phải
+microservices tách domain.
 
 ## Rule dễ hiểu cho AI khi code
 Mỗi module nên đi theo flow:

@@ -4,7 +4,7 @@ using Microsoft.AspNetCore.SignalR;
 using Syntwin.Application.Robots.Interfaces;
 using Syntwin.Domain.Enums;
 
-namespace Syntwin.Api.Hubs;
+namespace Syntwin.Hosting.Hubs;
 
 [Authorize]
 public sealed class TelemetryHub : Hub
@@ -14,9 +14,9 @@ public sealed class TelemetryHub : Hub
     private readonly IRobotStateCache _robotStateCache;
     private static readonly TimeSpan TelemetryViewerTtl = TimeSpan.FromHours(2);
     public TelemetryHub(
-    IRobotRepository robotRepository,
-    IRobotAccessService robotAccessService,
-    IRobotStateCache robotStateCache)
+        IRobotRepository robotRepository,
+        IRobotAccessService robotAccessService,
+        IRobotStateCache robotStateCache)
     {
         _robotRepository = robotRepository;
         _robotAccessService = robotAccessService;
@@ -63,9 +63,9 @@ public sealed class TelemetryHub : Hub
             GetRobotGroupName(parsedRobotId));
 
         await _robotStateCache.AddTelemetryViewerAsync(
-    parsedRobotId,
-    Context.ConnectionId,
-    TelemetryViewerTtl);
+            parsedRobotId,
+            Context.ConnectionId,
+            TelemetryViewerTtl);
     }
 
     public async Task LeaveRobotGroup(string robotId)
@@ -80,8 +80,8 @@ public sealed class TelemetryHub : Hub
             GetRobotGroupName(parsedRobotId));
 
         await _robotStateCache.RemoveTelemetryViewerAsync(
-    parsedRobotId,
-    Context.ConnectionId);
+            parsedRobotId,
+            Context.ConnectionId);
     }
 
     public override async Task OnDisconnectedAsync(Exception? exception)

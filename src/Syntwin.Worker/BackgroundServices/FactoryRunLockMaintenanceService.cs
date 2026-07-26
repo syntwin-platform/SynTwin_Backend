@@ -4,7 +4,7 @@ using Syntwin.Application.Common.Interfaces;
 using Syntwin.Application.FactoryRuns.Interfaces;
 using Syntwin.Application.Robots.Options;
 
-namespace Syntwin.Api.BackgroundServices;
+namespace Syntwin.Worker.BackgroundServices;
 
 public sealed class FactoryRunLockMaintenanceService : BackgroundService
 {
@@ -85,6 +85,13 @@ public sealed class FactoryRunLockMaintenanceService : BackgroundService
 
         foreach (var reference in references)
         {
+            using var lockScope = _logger.BeginScope(
+                new Dictionary<string, object?>
+                {
+                    ["RobotId"] = reference.RobotId,
+                    ["LockOwnerId"] = reference.OwnerId
+                });
+
             if (reference.ShouldRenew)
             {
                 await busyLock.RenewAsync(

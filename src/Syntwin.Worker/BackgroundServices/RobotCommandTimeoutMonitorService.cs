@@ -9,7 +9,7 @@ using Syntwin.Application.Robots.Options;
 using Syntwin.Application.Common.Interfaces;
 using Syntwin.Application.FactoryRuns.Interfaces;
 
-namespace Syntwin.Api.BackgroundServices;
+namespace Syntwin.Worker.BackgroundServices;
 
 public sealed class RobotCommandTimeoutMonitorService : BackgroundService
 {
@@ -109,6 +109,14 @@ public sealed class RobotCommandTimeoutMonitorService : BackgroundService
                 await timeoutScheduler.RemoveAsync(commandId, cancellationToken);
                 continue;
             }
+
+            using var commandScope = _logger.BeginScope(
+                new Dictionary<string, object?>
+                {
+                    ["CommandId"] = command.Id,
+                    ["RobotId"] = command.RobotId
+                });
+
             var existingResult = await commandRepository.GetResultByCommandIdAsync(
                 command.Id,
                 cancellationToken);
@@ -173,6 +181,10 @@ public sealed class RobotCommandTimeoutMonitorService : BackgroundService
                 Message = TimeoutMessage,
                 CompletedAt = now
             });
+
+            _logger.LogWarning(
+                "Marked an expired robot command as failed.");
+
             if (IsBusyLockCommand(command.CommandType))
             {
                 busyLockReleases.Add((command.RobotId, command.Id));

@@ -3,7 +3,7 @@ using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Options;
 using Syntwin.Infrastructure.Telemetry;
 
-namespace Syntwin.Api.HealthChecks;
+namespace Syntwin.Hosting.HealthChecks;
 
 public sealed class InfluxDbHealthCheck : IHealthCheck
 {

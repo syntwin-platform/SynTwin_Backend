@@ -10,6 +10,7 @@ COPY ["src/Syntwin.Api/Syntwin.Api.csproj", "src/Syntwin.Api/"]
 COPY ["src/Syntwin.Application/Syntwin.Application.csproj", "src/Syntwin.Application/"]
 COPY ["src/Syntwin.Domain/Syntwin.Domain.csproj", "src/Syntwin.Domain/"]
 COPY ["src/Syntwin.Infrastructure/Syntwin.Infrastructure.csproj", "src/Syntwin.Infrastructure/"]
+COPY ["src/Syntwin.Hosting/Syntwin.Hosting.csproj", "src/Syntwin.Hosting/"]
 RUN dotnet restore "src/Syntwin.Api/Syntwin.Api.csproj"
 COPY . .
 WORKDIR "/src/src/Syntwin.Api"
