@@ -51,7 +51,7 @@ images:
 substitutions:
   _REGION: asia-southeast1
   _REPOSITORY: syntwin-staging
-  _IMAGE_TAG: manual
+  _IMAGE_TAG: $SHORT_SHA
 
 options:
   logging: CLOUD_LOGGING_ONLY
