@@ -13,6 +13,8 @@ services:
       - syntwin_network
     restart: unless-stopped
 
+  # Transitional API-only image. Phase 1 local regression runs DbMigrator and
+  # Worker with dotnet; Phase 4 adds their dedicated container images.
   syntwin-api:
     build:
       context: .
@@ -22,7 +24,8 @@ services:
     environment:
       ASPNETCORE_ENVIRONMENT: Production
       ASPNETCORE_URLS: http://+:8080
-      Swagger__Enabled: "true"
+      Swagger__Enabled: "false"
+      Cors__AllowedOrigins__0: "${CORS_ALLOWED_ORIGIN:-http://localhost:3000}"
       ConnectionStrings__SyntwinDb: "Server=syntwin-sqlserver,1433;Database=${SQLSERVER_DATABASE};User Id=sa;Password=${SQLSERVER_SA_PASSWORD};TrustServerCertificate=True;Encrypt=True"
       Redis__ConnectionString: "syntwin-redis:6379"
       InfluxDb__Enabled: "true"

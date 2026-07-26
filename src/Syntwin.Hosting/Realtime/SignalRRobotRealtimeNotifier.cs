@@ -1,9 +1,10 @@
 ﻿using Microsoft.AspNetCore.SignalR;
-using Syntwin.Api.Hubs;
 using Syntwin.Application.Realtime.Dtos;
 using Syntwin.Application.Realtime.Interfaces;
 using Syntwin.Application.Robots.Dtos;
-namespace Syntwin.Api.Realtime;
+using Syntwin.Hosting.Hubs;
+
+namespace Syntwin.Hosting.Realtime;
 
 public sealed class SignalRRobotRealtimeNotifier : IRobotRealtimeNotifier
 {
@@ -15,8 +16,8 @@ public sealed class SignalRRobotRealtimeNotifier : IRobotRealtimeNotifier
     }
 
     public Task NotifyTelemetryUpdatedAsync(
-       RobotLatestStateResponse state,
-       CancellationToken cancellationToken = default)
+        RobotLatestStateResponse state,
+        CancellationToken cancellationToken = default)
     {
         return _hubContext.Clients
             .Group(TelemetryHub.GetRobotGroupName(state.RobotId))
@@ -42,8 +43,8 @@ public sealed class SignalRRobotRealtimeNotifier : IRobotRealtimeNotifier
     }
 
     public Task NotifyProgramUpdatedAsync(
-    ProgramUpdatedEvent programUpdated,
-    CancellationToken cancellationToken = default)
+        ProgramUpdatedEvent programUpdated,
+        CancellationToken cancellationToken = default)
     {
         return _hubContext.Clients
             .Group(TelemetryHub.GetRobotGroupName(programUpdated.RobotId))

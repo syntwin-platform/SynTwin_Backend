@@ -170,6 +170,25 @@ public sealed class FactoryRunApiDatabaseIntegrationTests(FactoryRunApiFixture f
             await fixture.Client.PostAsJsonAsync("/api/factory-runs", create),
             HttpStatusCode.Created);
 
+        // Exercise the legacy create/publish preparation path where a target can
+        // fail independently. New runs normally use immutable compiled artifacts
+        // and therefore do not create a RobotProgram during preparation.
+        await fixture.WithDbContextAsync(async db =>
+        {
+            var artifacts = await db.FactoryRunPrograms
+                .Where(program => program.FactoryRunId == run.Id)
+                .ToListAsync();
+
+            foreach (var artifact in artifacts)
+            {
+                artifact.CompiledProgramJson = null;
+                artifact.CompiledProgramHash = null;
+            }
+
+            await db.SaveChangesAsync();
+            return true;
+        });
+
         var firstPrepare = await ReadRunAsync(
             await fixture.Client.PostAsync($"/api/factory-runs/{run.Id}/prepare", null),
             HttpStatusCode.OK);

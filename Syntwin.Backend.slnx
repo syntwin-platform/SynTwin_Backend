@@ -2,8 +2,11 @@
   <Folder Name="/src/">
     <Project Path="src/Syntwin.Api/Syntwin.Api.csproj" />
     <Project Path="src/Syntwin.Application/Syntwin.Application.csproj" />
+    <Project Path="src/Syntwin.DbMigrator/Syntwin.DbMigrator.csproj" />
     <Project Path="src/Syntwin.Domain/Syntwin.Domain.csproj" />
+    <Project Path="src/Syntwin.Hosting/Syntwin.Hosting.csproj" />
     <Project Path="src/Syntwin.Infrastructure/Syntwin.Infrastructure.csproj" />
+    <Project Path="src/Syntwin.Worker/Syntwin.Worker.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Syntwin.Application.Tests/Syntwin.Application.Tests.csproj" />

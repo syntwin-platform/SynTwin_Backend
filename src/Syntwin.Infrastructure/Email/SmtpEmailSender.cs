@@ -27,7 +27,10 @@ public sealed class SmtpEmailSender : IEmailSender
     {
         if (!_options.Enabled)
         {
-            _logger.LogInformation("Email disabled. To={To}, Subject={Subject}, Body={Body}", to, subject, htmlBody);
+            _logger.LogInformation(
+                "Email delivery is disabled. To={To}, Subject={Subject}",
+                to,
+                subject);
             return;
         }
 

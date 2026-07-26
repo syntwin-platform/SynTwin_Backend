@@ -6,7 +6,8 @@ using Syntwin.Application.Robots.Options;
 using Syntwin.Domain.Entities;
 using Syntwin.Domain.Enums;
 using Syntwin.Application.Common.Interfaces;
-namespace Syntwin.Api.BackgroundServices;
+
+namespace Syntwin.Worker.BackgroundServices;
 
 public sealed class RobotOfflineMonitorService : BackgroundService
 {
@@ -116,6 +117,13 @@ public sealed class RobotOfflineMonitorService : BackgroundService
                 continue;
             }
 
+            using var robotScope = _logger.BeginScope(
+                new Dictionary<string, object?>
+                {
+                    ["CompanyId"] = robot.CompanyId,
+                    ["RobotId"] = robot.Id
+                });
+
             var redisLastSeenAt = await robotStateCache.GetLastSeenAsync(
                 robot.Id,
                 cancellationToken);
@@ -153,6 +161,9 @@ public sealed class RobotOfflineMonitorService : BackgroundService
                 ChangedAt = now,
                 LastSeenAt = robot.LastSeenAt
             });
+
+            _logger.LogInformation(
+                "Marked a robot offline after its heartbeat expired.");
         }
 
         if (statusEvents.Count == 0)

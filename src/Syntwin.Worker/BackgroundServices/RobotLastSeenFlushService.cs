@@ -3,7 +3,7 @@ using Syntwin.Application.Robots.Interfaces;
 using Syntwin.Application.Robots.Options;
 using Syntwin.Application.Common.Interfaces;
 
-namespace Syntwin.Api.BackgroundServices;
+namespace Syntwin.Worker.BackgroundServices;
 
 public sealed class RobotLastSeenFlushService : BackgroundService
 {
@@ -95,6 +95,12 @@ public sealed class RobotLastSeenFlushService : BackgroundService
 
         foreach (var robotId in dirtyRobotIds)
         {
+            using var robotScope = _logger.BeginScope(
+                new Dictionary<string, object?>
+                {
+                    ["RobotId"] = robotId
+                });
+
             if (!robotById.TryGetValue(robotId, out var robot))
             {
                 await robotStateCache.RemoveLastSeenDirtyAsync(robotId, cancellationToken);
@@ -116,6 +122,9 @@ public sealed class RobotLastSeenFlushService : BackgroundService
                 robot.LastSeenAt = lastSeenAt;
                 robot.UpdatedAt = now;
                 hasChanges = true;
+
+                _logger.LogDebug(
+                    "Updated the persisted robot LastSeenAt value.");
             }
 
             await robotStateCache.RemoveLastSeenDirtyAsync(robotId, cancellationToken);
