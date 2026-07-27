@@ -1723,6 +1723,46 @@ public sealed class FactoryRunService : IFactoryRunService
             }
         }
 
+        if (
+            factoryRun.CoordinationMode == FactoryCoordinationMode.Synchronized &&
+            !factoryRun.ActualStartSkewMs.HasValue)
+        {
+            var actualStartParticipants = factoryRun.Targets
+                .Where(target => target.ActualStartedAtUtc.HasValue)
+                .ToList();
+
+            var allActualStartsResolved = factoryRun.Targets.All(target =>
+                target.ActualStartedAtUtc.HasValue ||
+                target.Status is
+                    FactoryRunTargetStatus.Failed or
+                    FactoryRunTargetStatus.Cancelled);
+
+            if (
+                allActualStartsResolved &&
+                actualStartParticipants.Count > 0)
+            {
+                var actualStarts = actualStartParticipants
+                    .Select(target => target.ActualStartedAtUtc!.Value)
+                    .ToList();
+
+                var skewMs = (
+                    actualStarts.Max() -
+                    actualStarts.Min()).TotalMilliseconds;
+
+                factoryRun.ActualStartSkewMs = (int)Math.Min(
+                    int.MaxValue,
+                    Math.Max(0, Math.Round(skewMs)));
+
+                factoryRun.UpdatedAtUtc = DateTimeOffset.UtcNow;
+
+                _metrics.RecordFactoryRunStartSkew(
+                    actualStartParticipants.Count,
+                    factoryRun.ActualStartSkewMs.Value);
+
+                changed = true;
+            }
+        }
+
         if (factoryRun.Status == FactoryRunStatus.WaitingForReady)
         {
             var readinessResolved = factoryRun.Targets.All(target => target.Status is
