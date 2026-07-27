@@ -75,9 +75,12 @@ public sealed class AuthService : IAuthService
         user.Subscriptions.Add(subscription);
 
         await _userRepository.AddAsync(user, cancellationToken);
+
+        var response = await CreateAuthResponseAsync(user, cancellationToken);
+
         await _userRepository.SaveChangesAsync(cancellationToken);
 
-        return await CreateAuthResponseAsync(user, cancellationToken);
+        return response;
     }
 
     public async Task<AuthResponse> LoginAsync(
