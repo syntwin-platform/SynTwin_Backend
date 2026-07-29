@@ -12,6 +12,12 @@ public sealed class RobotLatestStateResponse
 
     public IReadOnlyList<double> JointAngles { get; set; } = Array.Empty<double>();
 
+    public long? SequenceNumber { get; set; }
+
+    public RobotIoStateDto? Io { get; set; }
+
+    public RobotExecutionStateDto? Execution { get; set; }
+
     public double? Temperature { get; set; }
 
     public bool? CollisionWarning { get; set; }
@@ -19,6 +25,10 @@ public sealed class RobotLatestStateResponse
     public DateTimeOffset? LastSeenAt { get; set; }
 
     public DateTimeOffset? Timestamp { get; set; }
+
+    public DateTimeOffset? ReceivedAt { get; set; }
+
+    public double? LatencyMilliseconds { get; set; }
 
     public string Source { get; set; } = "SqlFallback";
 }

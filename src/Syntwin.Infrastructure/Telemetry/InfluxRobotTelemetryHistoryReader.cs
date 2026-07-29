@@ -132,6 +132,8 @@ public sealed class InfluxRobotTelemetryHistoryReader : IRobotTelemetryHistoryRe
                 Timestamp = new DateTimeOffset(timestamp.Value, TimeSpan.Zero),
                 JointAngles = ReadJointAngles(record),
                 TcpPose = ReadTcpPose(record),
+                SequenceNumber = ReadNullableLong(record, "sequence_number"),
+                LatencyMilliseconds = ReadNullableDouble(record, "latency_ms"),
                 Temperature = ReadNullableDouble(record, "temperature"),
                 CollisionWarning = ReadNullableBool(record, "collision_warning"),
                 Status = ReadNullableString(record, "status_code"),
@@ -216,6 +218,30 @@ public sealed class InfluxRobotTelemetryHistoryReader : IRobotTelemetryHistoryRe
         };
     }
 
+    private static long? ReadNullableLong(
+        InfluxDB.Client.Core.Flux.Domain.FluxRecord record,
+        string key)
+    {
+        if (!record.Values.TryGetValue(key, out var value) || value is null)
+        {
+            return null;
+        }
+
+        return value switch
+        {
+            byte byteValue => byteValue,
+            short shortValue => shortValue,
+            int intValue => intValue,
+            long longValue => longValue,
+            _ when long.TryParse(
+                Convert.ToString(value, CultureInfo.InvariantCulture),
+                NumberStyles.Integer,
+                CultureInfo.InvariantCulture,
+                out var parsed) => parsed,
+            _ => null
+        };
+    }
+
     private static bool? ReadNullableBool(
         InfluxDB.Client.Core.Flux.Domain.FluxRecord record,
         string key)
@@ -258,6 +284,8 @@ public sealed class InfluxRobotTelemetryHistoryReader : IRobotTelemetryHistoryRe
             "tcp_rx",
             "tcp_ry",
             "tcp_rz",
+            "sequence_number",
+            "latency_ms",
             "temperature",
             "collision_warning",
             "status_code"

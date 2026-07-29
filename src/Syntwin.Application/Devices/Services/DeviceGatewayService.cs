@@ -357,6 +357,9 @@ IAuditLogRepository auditLogRepository,
 
         var now = DateTimeOffset.UtcNow;
         var timestamp = request.Timestamp ?? now;
+        var latencyMilliseconds = Math.Max(
+            0,
+            (now - timestamp).TotalMilliseconds);
         var shouldBroadcastOnline = await MarkRuntimeOnlineAsync(
             auth,
             now,
@@ -369,10 +372,15 @@ IAuditLogRepository auditLogRepository,
             Status = request.StatusCode.Trim(),
             TcpPose = request.TcpPose,
             JointAngles = request.JointAngles.ToArray(),
+            SequenceNumber = request.SequenceNumber,
+            Io = request.Io,
+            Execution = request.Execution,
             Temperature = request.Temperature,
             CollisionWarning = request.CollisionWarning,
             LastSeenAt = now,
             Timestamp = timestamp,
+            ReceivedAt = now,
+            LatencyMilliseconds = latencyMilliseconds,
             Source = "Redis"
         };
 
@@ -390,6 +398,8 @@ IAuditLogRepository auditLogRepository,
         Status = latestState.Status,
         TcpPose = latestState.TcpPose,
         JointAngles = latestState.JointAngles,
+        SequenceNumber = latestState.SequenceNumber,
+        LatencyMilliseconds = latestState.LatencyMilliseconds,
         Temperature = latestState.Temperature,
         CollisionWarning = latestState.CollisionWarning,
         Timestamp = timestamp,
@@ -450,6 +460,9 @@ CancellationToken cancellationToken)
 
         var now = DateTimeOffset.UtcNow;
         var timestamp = request.Timestamp ?? now;
+        var latencyMilliseconds = Math.Max(
+            0,
+            (now - timestamp).TotalMilliseconds);
         var runtimeOnline = await MarkRuntimeOnlineFromSessionAsync(
             robotId,
             now,
@@ -468,10 +481,15 @@ CancellationToken cancellationToken)
             Status = request.StatusCode.Trim(),
             TcpPose = request.TcpPose,
             JointAngles = request.JointAngles.ToArray(),
+            SequenceNumber = request.SequenceNumber,
+            Io = request.Io,
+            Execution = request.Execution,
             Temperature = request.Temperature,
             CollisionWarning = request.CollisionWarning,
             LastSeenAt = now,
             Timestamp = timestamp,
+            ReceivedAt = now,
+            LatencyMilliseconds = latencyMilliseconds,
             Source = "Redis"
         };
 
@@ -487,6 +505,8 @@ CancellationToken cancellationToken)
                 Status = latestState.Status,
                 TcpPose = latestState.TcpPose,
                 JointAngles = latestState.JointAngles,
+                SequenceNumber = latestState.SequenceNumber,
+                LatencyMilliseconds = latestState.LatencyMilliseconds,
                 Temperature = latestState.Temperature,
                 CollisionWarning = latestState.CollisionWarning,
                 Timestamp = timestamp,

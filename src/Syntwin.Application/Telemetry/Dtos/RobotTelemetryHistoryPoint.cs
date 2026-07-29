@@ -10,6 +10,10 @@ public sealed class RobotTelemetryHistoryPoint
 
     public TcpPoseDto? TcpPose { get; set; }
 
+    public long? SequenceNumber { get; set; }
+
+    public double? LatencyMilliseconds { get; set; }
+
     public double? Temperature { get; set; }
 
     public bool? CollisionWarning { get; set; }

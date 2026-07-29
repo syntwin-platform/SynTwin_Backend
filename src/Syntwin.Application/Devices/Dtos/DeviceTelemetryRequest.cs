@@ -16,6 +16,15 @@ public sealed class DeviceTelemetryRequest
     [MaxLength(6)]
     public IReadOnlyList<double> JointAngles { get; set; } = Array.Empty<double>();
 
+    [Range(0, long.MaxValue)]
+    public long? SequenceNumber { get; set; }
+
+    public RobotIoStateDto? Io { get; set; }
+
+    public RobotExecutionStateDto? Execution { get; set; }
+
+    // Kept for backward compatibility with existing device clients.
+    // New Fairino clients do not send temperature until the hardware supports it end-to-end.
     public double? Temperature { get; set; }
 
     [Required]

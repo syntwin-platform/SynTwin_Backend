@@ -118,6 +118,16 @@ public sealed class InfluxRobotTelemetryHistoryWriter : IRobotTelemetryHistoryWr
                 .Field("tcp_rz", request.TcpPose.Rz);
         }
 
+        if (request.SequenceNumber.HasValue)
+        {
+            point = point.Field("sequence_number", request.SequenceNumber.Value);
+        }
+
+        if (request.LatencyMilliseconds.HasValue)
+        {
+            point = point.Field("latency_ms", request.LatencyMilliseconds.Value);
+        }
+
         if (request.Temperature.HasValue)
         {
             point = point.Field("temperature", request.Temperature.Value);
