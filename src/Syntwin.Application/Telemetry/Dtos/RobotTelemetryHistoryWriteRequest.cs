@@ -20,6 +20,10 @@ public sealed class RobotTelemetryHistoryWriteRequest
 
     public IReadOnlyList<double> JointAngles { get; set; } = Array.Empty<double>();
 
+    public long? SequenceNumber { get; set; }
+
+    public double? LatencyMilliseconds { get; set; }
+
     public double? Temperature { get; set; }
 
     public bool? CollisionWarning { get; set; }
