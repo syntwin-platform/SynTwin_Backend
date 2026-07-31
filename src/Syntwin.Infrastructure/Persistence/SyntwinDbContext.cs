@@ -309,10 +309,10 @@ public sealed class SyntwinDbContext : DbContext
                 new SubscriptionPlan
                 {
                     Id = 2,
-                    Code = SubscriptionPlanCode.Basic,
-                    Name = "Basic",
-                    MonthlyPrice = 99000,
-                    MaxRobots = 3,
+                    Code = SubscriptionPlanCode.Starter,
+                    Name = "Starter",
+                    MonthlyPrice = 5000000,
+                    MaxRobots = 5,
                     CanView3D = true,
                     CanSendCommand = false,
                     AuditRetentionDays = 30,
@@ -322,13 +322,26 @@ public sealed class SyntwinDbContext : DbContext
                 new SubscriptionPlan
                 {
                     Id = 3,
-                    Code = SubscriptionPlanCode.Premium,
-                    Name = "Premium",
-                    MonthlyPrice = 299000,
-                    MaxRobots = 30,
+                    Code = SubscriptionPlanCode.Business,
+                    Name = "Business (SME Target)",
+                    MonthlyPrice = 15000000,
+                    MaxRobots = 20,
                     CanView3D = true,
                     CanSendCommand = true,
                     AuditRetentionDays = 365,
+                    IsActive = true,
+                    CreatedAt = seedDate
+                },
+                new SubscriptionPlan
+                {
+                    Id = 4,
+                    Code = SubscriptionPlanCode.Enterprise,
+                    Name = "Enterprise",
+                    MonthlyPrice = 50000000,
+                    MaxRobots = 9999,
+                    CanView3D = true,
+                    CanSendCommand = true,
+                    AuditRetentionDays = 3650,
                     IsActive = true,
                     CreatedAt = seedDate
                 });
