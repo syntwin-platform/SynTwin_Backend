@@ -1288,12 +1288,12 @@ namespace Syntwin.Infrastructure.Persistence.Migrations
                             AuditRetentionDays = 30,
                             CanSendCommand = false,
                             CanView3D = true,
-                            Code = "Basic",
+                            Code = "Starter",
                             CreatedAt = new DateTimeOffset(new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0)),
                             IsActive = true,
-                            MaxRobots = 3,
-                            MonthlyPrice = 99000m,
-                            Name = "Basic"
+                            MaxRobots = 5,
+                            MonthlyPrice = 5000000m,
+                            Name = "Starter"
                         },
                         new
                         {
@@ -1301,12 +1301,25 @@ namespace Syntwin.Infrastructure.Persistence.Migrations
                             AuditRetentionDays = 365,
                             CanSendCommand = true,
                             CanView3D = true,
-                            Code = "Premium",
+                            Code = "Business",
                             CreatedAt = new DateTimeOffset(new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0)),
                             IsActive = true,
-                            MaxRobots = 30,
-                            MonthlyPrice = 299000m,
-                            Name = "Premium"
+                            MaxRobots = 20,
+                            MonthlyPrice = 15000000m,
+                            Name = "Business (SME Target)"
+                        },
+                        new
+                        {
+                            Id = 4,
+                            AuditRetentionDays = 3650,
+                            CanSendCommand = true,
+                            CanView3D = true,
+                            Code = "Enterprise",
+                            CreatedAt = new DateTimeOffset(new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0)),
+                            IsActive = true,
+                            MaxRobots = 9999,
+                            MonthlyPrice = 50000000m,
+                            Name = "Enterprise"
                         });
                 });
 
